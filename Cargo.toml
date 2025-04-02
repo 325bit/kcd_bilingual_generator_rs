@@ -6,8 +6,6 @@ edition = "2021"
 [dependencies]
 directories = "6.0.0"
 quick-xml = "0.37.4"
-# quick-xml = "0.37.4"
 regex = "1.11.1"
 winreg = "0.55.0"
 zip = "2.5.0"
-# zip = "2.5.0"

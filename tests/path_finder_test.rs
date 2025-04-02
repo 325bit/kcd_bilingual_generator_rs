@@ -1,12 +1,10 @@
-use kcd_bilingual_generator_rust::core::path_finder::path_finder::PathFinder;
-
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use kcd_bilingual_generator_rust::core::path_finder::path_finder::PathFinder;
 
     #[test]
-    fn test_find_game_path_steam() {
+    fn path_finder_test() {
         let mut path_finder = PathFinder::new();
 
         // Mock or provide a real Steam installation path for testing
@@ -18,6 +16,4 @@ mod tests {
         // let game_path = result.unwrap();
         // assert!(game_path.exists(), "Game path should exist");
     }
-
-    
 }

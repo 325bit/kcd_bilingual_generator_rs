@@ -5,25 +5,37 @@ use quick_xml::Reader;
 use std::{
     collections::HashMap,
     fs::File,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
-use zip::ZipArchive;
+use zip::{
+    write::{ExtendedFileOptions, FileOptions},
+    CompressionMethod, ZipArchive, ZipWriter,
+};
 
 // Main generator struct that coordinates all operations
+#[derive(Debug)]
 pub struct BilingualGenerator {
     pub game_path: PathBuf,
     pub working_dir: PathBuf,
     pub files_to_process: Vec<String>,
     pub language_to_process: Vec<String>,
-    ///HashMap<Language, HashMap<Which_xml, single_xml_data>>
-    pub all_data: HashMap<String, HashMap<String, single_xml_data>>,
+    pub all_data: HashMap<XmlFile, HashMap<Language, HashMap<EntryId, LastTextValue>>>,
 }
-#[derive(Debug)]
-///HashMap<Entry id, Text in last cell>
-pub struct single_xml_data {
-    pub data: HashMap<String, String>,
-}
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct Language(pub String);
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct XmlFile(pub String);
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct EntryId(pub String);
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct LastTextValue(pub String);
+
+// #[derive(Debug)]
+// ///HashMap<Entry id, Text in last cell>
+// pub struct single_xml_data {
+//     pub data: HashMap<String, String>,
+// }
 impl BilingualGenerator {
     //Constructor to initialize the generator with the working directory
     pub fn init() -> Result<Self, BilingualGeneratorError> {
@@ -81,17 +93,11 @@ impl BilingualGenerator {
         for language in &self.language_to_process {
             let pak_filename = format!("{}_xml.pak", language);
             let pak_path = self.game_path.join("Localization").join(&pak_filename);
-            println!("pak_filename = {}, pak_path = {:?}", pak_filename, pak_path);
             let pak_file =
                 File::open(&pak_path).map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
 
             let mut archive = ZipArchive::new(pak_file)
                 .map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
-
-            let lang_map = self
-                .all_data
-                .entry(language.clone())
-                .or_insert_with(HashMap::new);
 
             for xml_filename in &self.files_to_process {
                 let mut xml_file = archive
@@ -104,7 +110,6 @@ impl BilingualGenerator {
                     .map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
 
                 let mut reader = Reader::from_str(&content);
-                // reader.trim_text(true);
                 let mut buf = Vec::new();
                 let mut single_data = HashMap::new();
                 let mut current_cells: Vec<String> = Vec::new();
@@ -120,8 +125,10 @@ impl BilingualGenerator {
                             inside_row = false;
                             if !current_cells.is_empty() && current_cells[0] != "Entry id" {
                                 if current_cells.len() >= 3 {
-                                    single_data
-                                        .insert(current_cells[0].clone(), current_cells[2].clone());
+                                    single_data.insert(
+                                        EntryId(current_cells[0].clone()),
+                                        LastTextValue(current_cells[2].clone()),
+                                    );
                                 }
                             }
                         }
@@ -133,12 +140,22 @@ impl BilingualGenerator {
                             }
                         }
                         Ok(Event::Eof) => break,
-                        Err(_) => return Err(BilingualGeneratorError::XmlProcessingFailed),
+                        Err(_) => {
+                            return Err(BilingualGeneratorError::XmlProcessingFailed(
+                                "Could not parse XML structure.".to_string(),
+                            ))
+                        }
                         _ => {}
                     }
                     buf.clear();
                 }
-                lang_map.insert(xml_filename.clone(), single_xml_data { data: single_data });
+
+                // Insert data into the restructured all_data
+                let xml_file_entry = self
+                    .all_data
+                    .entry(XmlFile(xml_filename.clone()))
+                    .or_insert_with(HashMap::new);
+                xml_file_entry.insert(Language(language.clone()), single_data);
             }
         }
         Ok(())
@@ -149,26 +166,110 @@ impl BilingualGenerator {
     /// 2. Create bilingual version
     /// 3. Save modified XML to output directory
     /// Return paths to modified files
-    fn process_files(
-        files: Vec<PathBuf>,
-        output_dir: &Path,
-    ) -> Result<Vec<PathBuf>, BilingualGeneratorError> {
-        return Err(BilingualGeneratorError::XmlProcessingFailed);
-    }
+    // fn process_files(
+    //     files: Vec<PathBuf>,
+    //     output_dir: &Path,
+    // ) -> Result<Vec<PathBuf>, BilingualGeneratorError> {
+    //     return Err(BilingualGeneratorError::XmlProcessingFailed);
+    // }
 
-    fn process_single_file(
-        input_path: &Path,
-        output_dir: &Path,
+    pub fn process_single_bilingual(
+        &self,
+        primary_language: &str,
+        secondary_language: &str,
     ) -> Result<PathBuf, BilingualGeneratorError> {
-        return Err(BilingualGeneratorError::XmlProcessingFailed);
+        // Create output directory
+        let xml_output_dir = self.working_dir.join("bilingual_xml");
+        let mut xml_output_set: Vec<PathBuf> = vec![];
+        std::fs::create_dir_all(&xml_output_dir).map_err(|e| {
+            BilingualGeneratorError::XmlProcessingFailed(format!("Error processing XML: {}", e))
+        })?;
+
+        // Prepare language identifiers
+        let primary_lang = Language(primary_language.to_string());
+        let secondary_lang = Language(secondary_language.to_string());
+
+        // Process each XML file
+        for file_name in &self.files_to_process {
+            let xml_file = XmlFile(file_name.clone());
+            // println!("file name = {}", file_name);
+            // Get data for this specific XML file
+            let file_data = self.all_data.get(&xml_file).ok_or(
+                BilingualGeneratorError::XmlProcessingFailed(format!(
+                    "Could not find the required XML file: {}",
+                    file_name
+                )),
+            )?;
+
+            // Get entries for both languages
+            let primary_entries = file_data.get(&primary_lang).ok_or(
+                BilingualGeneratorError::XmlProcessingFailed(
+                    "Could not Get primary_entries for primary_language.".to_string(),
+                ),
+            )?;
+            let empty_map: HashMap<EntryId, LastTextValue> = HashMap::new();
+            let secondary_entries = file_data.get(&secondary_lang).unwrap_or(&empty_map);
+
+            // Build XML content
+            let mut rows = Vec::new();
+            for (entry_id, primary_text) in primary_entries {
+                let secondary_text = secondary_entries
+                    .get(entry_id)
+                    .map(|lv| lv.0.as_str())
+                    .unwrap_or("");
+
+                rows.push(format!(
+                    "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{} / {}</Cell></Row>",
+                    entry_id.0, primary_text.0, primary_text.0, secondary_text
+                ));
+            }
+
+            // Write to file
+            let xml_content = format!("<Table>\n{}\n</Table>", rows.join("\n"));
+            let xml_output_path = xml_output_dir.join(file_name);
+            xml_output_set.push(xml_output_path.clone());
+            std::fs::write(&xml_output_path, xml_content).map_err(|e| {
+                BilingualGeneratorError::XmlProcessingFailed(format!("Error processing XML: {}", e))
+            })?;
+        }
+
+        match create_new_pak(xml_output_set, &xml_output_dir, primary_language) {
+            Ok(_) => Ok(xml_output_dir),
+            Err(_) => Err(BilingualGeneratorError::PakCreationFailed),
+        }
+    }
+}
+fn create_new_pak(
+    files: Vec<PathBuf>,
+    output_dir: &Path,
+    primary_language: &str,
+) -> Result<(), BilingualGeneratorError> {
+    let pak_name = format!("{}_xml.pak", primary_language);
+    let pak_path = output_dir.join(pak_name);
+
+    let file = File::create(&pak_path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+    let mut zip = ZipWriter::new(file);
+    let options: FileOptions<'_, ExtendedFileOptions> =
+        FileOptions::default().compression_method(CompressionMethod::Stored);
+
+    for path in files {
+        let file_name = path
+            .file_name()
+            .ok_or(BilingualGeneratorError::PakCreationFailed)?;
+        let file_name_str = file_name
+            .to_str()
+            .ok_or(BilingualGeneratorError::PakCreationFailed)?;
+
+        zip.start_file(file_name_str, options.clone())
+            .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+        let content =
+            std::fs::read(&path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+        zip.write_all(&content)
+            .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
     }
 
-    /// Implement PAK creation logic
-    /// Create new PAK with modified files
-    fn create_new_pak(
-        files: Vec<PathBuf>,
-        output_dir: &Path,
-    ) -> Result<(), BilingualGeneratorError> {
-        return Err(BilingualGeneratorError::PakCreationFailed);
-    }
+    zip.finish()
+        .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+
+    Ok(())
 }

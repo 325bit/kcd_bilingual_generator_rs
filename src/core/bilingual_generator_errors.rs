@@ -3,7 +3,7 @@ use std::{fmt, io};
 pub enum BilingualGeneratorError {
     GameNotFound,
     PakExtractionFailed,
-    XmlProcessingFailed,
+    XmlProcessingFailed(String),
     PakCreationFailed,
     IoError(std::io::Error),
 }
@@ -15,9 +15,10 @@ impl fmt::Display for BilingualGeneratorError {
             BilingualGeneratorError::PakExtractionFailed => {
                 write!(f, "Failed to extract PAK files")
             }
-            BilingualGeneratorError::XmlProcessingFailed => {
-                write!(f, "Failed to process XML files")
+            BilingualGeneratorError::XmlProcessingFailed(ref msg) => {
+                write!(f, "XML processing failed: {}", msg)
             }
+
             BilingualGeneratorError::PakCreationFailed => {
                 write!(f, "Failed to create new PAK file")
             }
@@ -31,7 +32,9 @@ impl fmt::Debug for BilingualGeneratorError {
         match self {
             BilingualGeneratorError::GameNotFound => write!(f, "GameNotFound"),
             BilingualGeneratorError::PakExtractionFailed => write!(f, "PakExtractionFailed"),
-            BilingualGeneratorError::XmlProcessingFailed => write!(f, "XmlProcessingFailed"),
+            BilingualGeneratorError::XmlProcessingFailed(ref msg) => {
+                write!(f, "XML processing failed: {}", msg)
+            }
             BilingualGeneratorError::PakCreationFailed => write!(f, "PakCreationFailed"),
             BilingualGeneratorError::IoError(_) => write!(f, "IoError"),
         }
