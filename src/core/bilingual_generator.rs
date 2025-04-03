@@ -3,11 +3,13 @@ use super::path_finder::PathFinder;
 use indexmap::IndexMap;
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use rayon::prelude::*;
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 use zip::{
     write::{ExtendedFileOptions, FileOptions},
@@ -40,14 +42,14 @@ pub struct LastTextValue(pub String);
 impl BilingualGenerator {
     //Constructor to initialize the generator with the working directory
     pub fn init() -> Result<Self, BilingualGeneratorError> {
-        let working_dir = std::env::current_dir()?;
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::new());
         let files_to_process = vec![
             String::from("text_ui_dialog.xml"),    // Dialogues
             String::from("text_ui_quest.xml"),     // Quests
             String::from("text_ui_tutorials.xml"), // Tutorials
             String::from("text_ui_soul.xml"),      // Stats/Effects
             String::from("text_ui_items.xml"),     // Items
-                                                   // String::from("text_ui_menus.xml"),     // Menus
+            String::from("text_ui_menus.xml"),     // Menus
         ];
         let defaut_language_to_process = vec![
             String::from("Chineses"),
@@ -57,126 +59,156 @@ impl BilingualGenerator {
             // String::from("Spanish"),
             // String::from("Japanese"),
         ];
+        let mut path_finder = PathFinder::new();
+        // let game_path = path_finder
+        //     .find_game_path()
+        //     .map(|p| p.to_path_buf())
+        //     .unwrap_or_else(|_| PathBuf::new());
+        let kcd_path = match path_finder.find_game_path() {
+            Ok(path) => path.to_path_buf(),
+            Err(_) => PathBuf::new(),
+        };
         Ok(Self {
-            game_path: PathBuf::new(),
+            game_path: kcd_path,
             working_dir,
             files_to_process,
             language_to_process: defaut_language_to_process,
             all_data: HashMap::new(),
         })
     }
+    pub fn acquire_bilingual_set(&self) -> Result<Vec<(String, String)>, BilingualGeneratorError> {
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::new());
+        let bilingual_set_dir = working_dir.join("assets\\bilingual_set.txt");
+        let bilingual_set_file = File::open(&bilingual_set_dir).map_err(|_| {
+            BilingualGeneratorError::InvalidBilingualSet(format!(
+                "No bilingual_set.txt in {:?}",
+                working_dir
+            ))
+        })?;
+        let reader = BufReader::new(bilingual_set_file);
+        let mut bilingual_set: Vec<(String, String)> = vec![];
+        for (_, line_result) in reader.lines().enumerate() {
+            let line: String = line_result
+                .map_err(|_| BilingualGeneratorError::InvalidBilingualSet("what".to_string()))?;
+            let trimmed_line = line.trim();
 
+            // Skip empty lines
+            if trimmed_line.is_empty() {
+                continue;
+            }
+
+            // Split into primary and secondary languages
+            let parts: Vec<&str> = trimmed_line.split('+').map(|s| s.trim()).collect();
+            if parts.len() != 2 {
+                return Err(BilingualGeneratorError::InvalidBilingualSet(line));
+            }
+
+            let primary_language = parts[0].to_string();
+            let secondary_language = parts[1].to_string();
+            bilingual_set.push((primary_language, secondary_language));
+        }
+        Ok(bilingual_set)
+    }
     // Main workflow method
-    pub fn generate_bilingual_resources(&mut self) -> Result<(), BilingualGeneratorError> {
-        // 1. Locate game installation
-        self.locate_game()?;
+    // pub fn generate_bilingual_resources(&mut self) -> Result<(), BilingualGeneratorError> {
+    //     // Initialize
+    //     // BilingualGenerator::init()?;
+    //     // BilingualGenerator::acquire_bilingual_set()?;
 
-        // 2. Find and extract XML PAKs
-        // let extracted_files =
+    //     // reading the bilingual set that need genarated into generated_bilingual_set
 
-        // 3. Process XML files
-        // let modified_files = self.process_xml_files(extracted_files)?;
+    //     // Process XML files
+    //     // for (primary_language, secondary_language) in generated_bilingual_set
+    //     // self.process_single_bilingual(primary_language, secondary_language)?;
 
-        // 4. Create new PAK file
-        // self.create_new_pak(modified_files)?;
-
-        Ok(())
-    }
-    fn locate_game(&mut self) -> Result<(), BilingualGeneratorError> {
-        let mut path_finder = PathFinder::new();
-        self.game_path = path_finder.find_game_path()?.to_path_buf();
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     /// Reads XML files from the pak files located in the Localization folder and stores the Entry id
     /// and secondary text (last cell) for each XML file into self.all_data.
     pub fn read_xml_from_paks(&mut self) -> Result<(), BilingualGeneratorError> {
-        for language in &self.language_to_process {
-            let pak_filename = format!("{}_xml.pak", language);
-            let pak_path = self.game_path.join("Localization").join(&pak_filename);
-            let pak_file =
-                File::open(&pak_path).map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
+        // Collect all_data in a thread-safe manner
+        let all_data = Mutex::new(&mut self.all_data);
 
-            let mut archive = ZipArchive::new(pak_file)
-                .map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
-
-            for xml_filename in &self.files_to_process {
-                let mut xml_file = archive
-                    .by_name(xml_filename)
+        self.language_to_process
+            .par_iter()
+            .try_for_each(|language| {
+                let pak_filename = format!("{}_xml.pak", language);
+                let pak_path = self.game_path.join("Localization").join(&pak_filename);
+                let pak_file = File::open(&pak_path)
                     .map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
 
-                let mut content = String::new();
-                xml_file
-                    .read_to_string(&mut content)
+                let mut archive = ZipArchive::new(pak_file)
                     .map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
 
-                let mut reader = Reader::from_str(&content);
-                let mut buf = Vec::new();
-                let mut single_data = IndexMap::new();
-                let mut current_cells: Vec<String> = Vec::new();
-                let mut inside_row = false;
+                self.files_to_process.iter().try_for_each(|xml_filename| {
+                    let mut xml_file = archive
+                        .by_name(xml_filename)
+                        .map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
 
-                loop {
-                    match reader.read_event_into(&mut buf) {
-                        Ok(Event::Start(ref e)) if e.name().as_ref() == b"Row" => {
-                            inside_row = true;
-                            current_cells.clear();
-                        }
-                        Ok(Event::End(ref e)) if e.name().as_ref() == b"Row" => {
-                            inside_row = false;
-                            if !current_cells.is_empty() && current_cells[0] != "Entry id" {
-                                if current_cells.len() >= 3 {
-                                    single_data.insert(
-                                        EntryId(current_cells[0].clone()),
-                                        LastTextValue(current_cells[2].clone()),
-                                    );
+                    let mut content = String::new();
+                    xml_file
+                        .read_to_string(&mut content)
+                        .map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
+
+                    let mut reader = Reader::from_str(&content);
+                    // reader.trim_text(true); // Reduces unnecessary allocations
+                    let mut buf = Vec::with_capacity(512); // Pre-allocate buffer
+                    let mut single_data = IndexMap::new();
+                    let mut current_cells: Vec<String> = Vec::with_capacity(4); // Pre-allocate
+                    let mut inside_row = false;
+
+                    loop {
+                        match reader.read_event_into(&mut buf) {
+                            Ok(Event::Start(e)) if e.name().as_ref() == b"Row" => {
+                                inside_row = true;
+                                current_cells.clear();
+                            }
+                            Ok(Event::End(e)) if e.name().as_ref() == b"Row" => {
+                                inside_row = false;
+                                if !current_cells.is_empty() && current_cells[0] != "Entry id" {
+                                    if current_cells.len() >= 3 {
+                                        single_data.insert(
+                                            EntryId(current_cells[0].clone()),
+                                            LastTextValue(current_cells[2].clone()),
+                                        );
+                                    }
                                 }
                             }
-                        }
-                        Ok(Event::Text(e)) => {
-                            if inside_row {
-                                // Read the raw text (including escaped entities) as a string
-                                let raw_text = std::str::from_utf8(e.as_ref()).map_err(|_| {
-                                    BilingualGeneratorError::XmlProcessingFailed(
-                                        "Invalid UTF-8 in XML text".to_string(),
-                                    )
-                                })?;
-                                current_cells.push(raw_text.to_string());
+                            Ok(Event::Text(e)) => {
+                                if inside_row {
+                                    // Read the raw text (including escaped entities) as a string
+                                    let raw_text =
+                                        std::str::from_utf8(e.as_ref()).map_err(|_| {
+                                            BilingualGeneratorError::XmlProcessingFailed(
+                                                "Invalid UTF-8 in XML text".to_string(),
+                                            )
+                                        })?;
+                                    current_cells.push(raw_text.to_string());
+                                }
                             }
+                            Ok(Event::Eof) => break,
+                            Err(e) => {
+                                return Err(BilingualGeneratorError::XmlProcessingFailed(format!(
+                                    "XML error: {}",
+                                    e
+                                )))
+                            }
+                            _ => {}
                         }
-                        Ok(Event::Eof) => break,
-                        Err(_) => {
-                            return Err(BilingualGeneratorError::XmlProcessingFailed(
-                                "Could not parse XML structure.".to_string(),
-                            ))
-                        }
-                        _ => {}
+                        buf.clear();
                     }
-                    buf.clear();
-                }
 
-                // Insert data into the restructured all_data
-                let xml_file_entry = self
-                    .all_data
-                    .entry(XmlFile(xml_filename.clone()))
-                    .or_insert_with(HashMap::new);
-                xml_file_entry.insert(Language(language.clone()), single_data);
-            }
-        }
-        Ok(())
+                    // Thread-safe insertion into all_data
+                    let mut guard = all_data.lock().unwrap();
+                    guard
+                        .entry(XmlFile(xml_filename.clone()))
+                        .or_insert_with(HashMap::new)
+                        .insert(Language(language.clone()), single_data);
+                    Ok(())
+                })
+            })
     }
-
-    /// Process each XML file:
-    /// 1. Parse original XML
-    /// 2. Create bilingual version
-    /// 3. Save modified XML to output directory
-    /// Return paths to modified files
-    // fn process_files(
-    //     files: Vec<PathBuf>,
-    //     output_dir: &Path,
-    // ) -> Result<Vec<PathBuf>, BilingualGeneratorError> {
-    //     return Err(BilingualGeneratorError::XmlProcessingFailed);
-    // }
 
     pub fn process_single_bilingual(
         &self,
@@ -184,8 +216,12 @@ impl BilingualGenerator {
         secondary_language: &str,
     ) -> Result<PathBuf, BilingualGeneratorError> {
         // Create output directory
-        let xml_output_dir = self.working_dir.join("bilingual_xml");
-        let mut xml_output_set: Vec<PathBuf> = vec![];
+        let xml_output_dir = self.working_dir.join(format!(
+            "bilingual_xml\\{} + {}",
+            primary_language, secondary_language
+        ));
+        let xml_output_set: Mutex<Vec<PathBuf>> = Mutex::new(vec![]); // Use Mutex for thread safety
+
         std::fs::create_dir_all(&xml_output_dir).map_err(|e| {
             BilingualGeneratorError::XmlProcessingFailed(format!("Error processing XML: {}", e))
         })?;
@@ -193,52 +229,101 @@ impl BilingualGenerator {
         // Prepare language identifiers
         let primary_lang = Language(primary_language.to_string());
         let secondary_lang = Language(secondary_language.to_string());
+
         // Define separators
         let separator_slash = " / ";
         let separator_newline = "\\n";
-        // Process each XML file
-        for file_name in &self.files_to_process {
+
+        // Process each XML file in parallel
+        self.files_to_process.par_iter().for_each(|file_name| {
             let xml_file = XmlFile(file_name.clone());
-            let file_data = self.all_data.get(&xml_file).ok_or(
-                BilingualGeneratorError::XmlProcessingFailed(format!(
-                    "Could not find the required XML file: {}",
-                    file_name
-                )),
-            )?;
+            let file_data =
+                self.all_data
+                    .get(&xml_file)
+                    .ok_or(BilingualGeneratorError::XmlProcessingFailed(format!(
+                        "Could not find the required XML file: {}",
+                        file_name
+                    )));
 
-            // Get entries for both languages
-            let primary_entries = file_data.get(&primary_lang).ok_or(
-                BilingualGeneratorError::XmlProcessingFailed(
-                    "Could not Get primary_entries for primary_language.".to_string(),
-                ),
-            )?;
-            let empty_map: IndexMap<EntryId, LastTextValue> = IndexMap::new();
-            let secondary_entries = file_data.get(&secondary_lang).unwrap_or(&empty_map);
-            let english_entries = file_data
-                .get(&Language("English".to_string()))
-                .unwrap_or(&empty_map);
+            if let Ok(file_data) = file_data {
+                // Get entries for both languages
+                let primary_entries = file_data.get(&primary_lang).ok_or(
+                    BilingualGeneratorError::XmlProcessingFailed(
+                        "Could not Get primary_entries for primary_language.".to_string(),
+                    ),
+                );
+                let empty_map: IndexMap<EntryId, LastTextValue> = IndexMap::new();
+                let secondary_entries = file_data.get(&secondary_lang).unwrap_or(&empty_map);
+                let english_entries = file_data
+                    .get(&Language("English".to_string()))
+                    .unwrap_or(&empty_map);
 
-            // Build XML content
-            let mut rows = Vec::new();
-            for (entry_id, primary_text) in primary_entries {
-                let secondary_text = secondary_entries
-                    .get(entry_id)
-                    .map(|lv| lv.0.as_str())
-                    .unwrap_or("MISSING");
-                let english_text = english_entries
-                    .get(entry_id)
-                    .map(|lv| lv.0.as_str())
-                    .unwrap_or("MISSING");
+                // Build XML content
+                let mut rows = Vec::new();
+                for (entry_id, primary_text) in primary_entries.unwrap() {
+                    let secondary_text = secondary_entries
+                        .get(entry_id)
+                        .map(|lv| lv.0.as_str())
+                        .unwrap_or("MISSING");
+                    let english_text = english_entries
+                        .get(entry_id)
+                        .map(|lv| lv.0.as_str())
+                        .unwrap_or("MISSING");
 
-                let combined_text = if file_name == "text_ui_menus.xml" {
-                    let words_count = if primary_text.0 != "MISSING" {
-                        primary_text.0.split_whitespace().count()
-                    } else {
-                        0
-                    };
+                    let combined_text = if file_name == "text_ui_menus.xml" {
+                        let words_count = if primary_text.0 != "MISSING" {
+                            primary_text.0.split_whitespace().count()
+                        } else {
+                            0
+                        };
 
-                    if !entry_id.0.contains("ui_helpoverlay") {
-                        if entry_id.0.contains("ui_loading") || entry_id.0.contains("codex_cont") {
+                        if !entry_id.0.contains("ui_helpoverlay") {
+                            if entry_id.0.contains("ui_loading")
+                                || entry_id.0.contains("codex_cont")
+                            {
+                                if secondary_text != "MISSING" {
+                                    format!(
+                                        "{} {} {}",
+                                        primary_text.0, separator_newline, secondary_text
+                                    )
+                                } else {
+                                    primary_text.0.clone()
+                                }
+                            } else if words_count < 3 {
+                                primary_text.0.clone()
+                            } else {
+                                if secondary_text != "MISSING" {
+                                    format!(
+                                        "{} {} {}",
+                                        primary_text.0, separator_slash, secondary_text
+                                    )
+                                } else {
+                                    primary_text.0.clone()
+                                }
+                            }
+                        } else {
+                            primary_text.0.clone()
+                        }
+                    } else if file_name == "text_ui_dialog.xml" {
+                        if secondary_text != "MISSING" {
+                            format!(
+                                "{} {} {}",
+                                primary_text.0, separator_newline, secondary_text
+                            )
+                        } else {
+                            format!("{} {} {}", primary_text.0, separator_newline, english_text)
+                        }
+                    } else if file_name == "text_ui_items.xml" {
+                        if (entry_id.0.contains("_step_")
+                            && !entry_id.0.contains("_step_1")
+                            && primary_text.0.len() >= 10)
+                            || (entry_id.0.contains("_step_1")
+                                && (entry_id.0.contains("scatter")
+                                    || entry_id.0.contains("longWeak")
+                                    || entry_id.0.contains("bane")))
+                        {
+                            primary_text.0.clone()
+                        } else if primary_text.0.len() >= 15 {
                             if secondary_text != "MISSING" {
                                 format!(
                                     "{} {} {}",
@@ -247,8 +332,6 @@ impl BilingualGenerator {
                             } else {
                                 primary_text.0.clone()
                             }
-                        } else if words_count < 3 {
-                            primary_text.0.clone()
                         } else {
                             if secondary_text != "MISSING" {
                                 format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
@@ -256,96 +339,74 @@ impl BilingualGenerator {
                                 primary_text.0.clone()
                             }
                         }
-                    } else {
-                        primary_text.0.clone()
-                    }
-                } else if file_name == "text_ui_dialog.xml" {
-                    if secondary_text != "MISSING" {
-                        format!(
-                            "{} {} {}",
-                            primary_text.0, separator_newline, secondary_text
-                        )
-                    } else {
-                        format!("{} {} {}", primary_text.0, separator_newline, english_text)
-                    }
-                } else if file_name == "text_ui_items.xml" {
-                    if (entry_id.0.contains("_step_")
-                        && !entry_id.0.contains("_step_1")
-                        && primary_text.0.len() >= 10)
-                        || (entry_id.0.contains("_step_1")
-                            && (entry_id.0.contains("scatter")
-                                || entry_id.0.contains("longWeak")
-                                || entry_id.0.contains("bane")))
-                    {
-                        primary_text.0.clone()
-                    } else if primary_text.0.len() >= 15 {
-                        if secondary_text != "MISSING" {
-                            format!(
-                                "{} {} {}",
-                                primary_text.0, separator_newline, secondary_text
-                            )
+                    } else if file_name == "text_ui_soul.xml" {
+                        if primary_text.0.len() <= 6 {
+                            if secondary_text != "MISSING" {
+                                format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
+                            } else {
+                                primary_text.0.clone()
+                            }
+                        } else if (entry_id.0.contains("buff_")
+                            && entry_id.0.contains("_desc")
+                            && !entry_id.0.contains("drunkenness_desc"))
+                            || (entry_id.0.contains("perk_") && entry_id.0.contains("_desc"))
+                        {
+                            if secondary_text != "MISSING" {
+                                format!(
+                                    "{} {} {}",
+                                    primary_text.0, separator_newline, secondary_text
+                                )
+                            } else {
+                                primary_text.0.clone()
+                            }
                         } else {
                             primary_text.0.clone()
                         }
                     } else {
+                        // For all other files
                         if secondary_text != "MISSING" {
                             format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
                         } else {
-                            primary_text.0.clone()
+                            format!("{} {} {}", primary_text.0, separator_slash, english_text)
                         }
-                    }
-                } else if file_name == "text_ui_soul.xml" {
-                    if primary_text.0.len() <= 6 {
-                        if secondary_text != "MISSING" {
-                            format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
-                        } else {
-                            primary_text.0.clone()
-                        }
-                    } else if (entry_id.0.contains("buff_")
-                        && entry_id.0.contains("_desc")
-                        && !entry_id.0.contains("drunkenness_desc"))
-                        || (entry_id.0.contains("perk_") && entry_id.0.contains("_desc"))
-                    {
-                        if secondary_text != "MISSING" {
-                            format!(
-                                "{} {} {}",
-                                primary_text.0, separator_newline, secondary_text
-                            )
-                        } else {
-                            primary_text.0.clone()
-                        }
-                    } else {
-                        primary_text.0.clone()
-                    }
-                } else {
-                    // For all other files
-                    if secondary_text != "MISSING" {
-                        format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
-                    } else {
-                        format!("{} {} {}", primary_text.0, separator_slash, english_text)
-                    }
-                };
+                    };
 
-                rows.push(format!(
-                    "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{}</Cell></Row>",
-                    entry_id.0, primary_text.0, combined_text
-                ));
+                    rows.push(format!(
+                        "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{}</Cell></Row>",
+                        entry_id.0, primary_text.0, combined_text
+                    ));
+                }
+
+                // Write to file
+                let xml_content = format!("<Table>\n{}\n</Table>", rows.join("\n"));
+                let xml_output_path = xml_output_dir.join(file_name);
+
+                // Push the path to the output set
+                let mut xml_output_set = xml_output_set.lock().unwrap();
+                xml_output_set.push(xml_output_path.clone());
+
+                std::fs::write(&xml_output_path, xml_content)
+                    .map_err(|e| {
+                        BilingualGeneratorError::XmlProcessingFailed(format!(
+                            "Error processing XML: {}",
+                            e
+                        ))
+                    })
+                    .unwrap();
             }
+        });
 
-            // Write to file
-            let xml_content = format!("<Table>\n{}\n</Table>", rows.join("\n"));
-            let xml_output_path = xml_output_dir.join(file_name);
-            xml_output_set.push(xml_output_path.clone());
-            std::fs::write(&xml_output_path, xml_content).map_err(|e| {
-                BilingualGeneratorError::XmlProcessingFailed(format!("Error processing XML: {}", e))
-            })?;
-        }
-
-        match Self::create_new_pak(xml_output_set, &xml_output_dir, primary_language) {
+        // After parallel processing, merge results and proceed
+        match Self::create_new_pak(
+            xml_output_set.into_inner().unwrap(),
+            &xml_output_dir,
+            primary_language,
+        ) {
             Ok(_) => Ok(xml_output_dir),
             Err(_) => Err(BilingualGeneratorError::PakCreationFailed),
         }
     }
+
     pub fn create_new_pak(
         files: Vec<PathBuf>,
         output_dir: &Path,
