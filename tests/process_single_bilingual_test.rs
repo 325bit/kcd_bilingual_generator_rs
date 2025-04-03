@@ -7,7 +7,7 @@ mod tests {
     };
 
     #[test]
-    fn read_xml_test() -> Result<(), BilingualGeneratorError> {
+    fn process_single_bilingual_test() -> Result<(), BilingualGeneratorError> {
         // Use the path from PathFinder to locate the actual game path
         let mut path_finder = PathFinder::new();
         let game_path = path_finder.find_game_path().unwrap();

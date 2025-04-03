@@ -332,6 +332,7 @@ name = "kcd_bilingual_generator_rust"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "indexmap",
  "quick-xml",
  "regex",
  "winreg",

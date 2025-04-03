@@ -1,5 +1,6 @@
 use super::bilingual_generator_errors::BilingualGeneratorError;
 use super::path_finder::PathFinder;
+use indexmap::IndexMap;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::{
@@ -20,7 +21,7 @@ pub struct BilingualGenerator {
     pub working_dir: PathBuf,
     pub files_to_process: Vec<String>,
     pub language_to_process: Vec<String>,
-    pub all_data: HashMap<XmlFile, HashMap<Language, HashMap<EntryId, LastTextValue>>>,
+    pub all_data: HashMap<XmlFile, HashMap<Language, IndexMap<EntryId, LastTextValue>>>,
 }
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Language(pub String);
@@ -46,15 +47,15 @@ impl BilingualGenerator {
             String::from("text_ui_tutorials.xml"), // Tutorials
             String::from("text_ui_soul.xml"),      // Stats/Effects
             String::from("text_ui_items.xml"),     // Items
-            String::from("text_ui_menus.xml"),     // Menus
+                                                   // String::from("text_ui_menus.xml"),     // Menus
         ];
         let defaut_language_to_process = vec![
             String::from("Chineses"),
             String::from("English"),
-            String::from("German"),
-            String::from("French"),
-            String::from("Spanish"),
-            String::from("Japanese"),
+            // String::from("German"),
+            // String::from("French"),
+            // String::from("Spanish"),
+            // String::from("Japanese"),
         ];
         Ok(Self {
             game_path: PathBuf::new(),
@@ -111,7 +112,7 @@ impl BilingualGenerator {
 
                 let mut reader = Reader::from_str(&content);
                 let mut buf = Vec::new();
-                let mut single_data = HashMap::new();
+                let mut single_data = IndexMap::new();
                 let mut current_cells: Vec<String> = Vec::new();
                 let mut inside_row = false;
 
@@ -134,9 +135,13 @@ impl BilingualGenerator {
                         }
                         Ok(Event::Text(e)) => {
                             if inside_row {
-                                if let Ok(text) = e.unescape().map(|s| s.into_owned()) {
-                                    current_cells.push(text);
-                                }
+                                // Read the raw text (including escaped entities) as a string
+                                let raw_text = std::str::from_utf8(e.as_ref()).map_err(|_| {
+                                    BilingualGeneratorError::XmlProcessingFailed(
+                                        "Invalid UTF-8 in XML text".to_string(),
+                                    )
+                                })?;
+                                current_cells.push(raw_text.to_string());
                             }
                         }
                         Ok(Event::Eof) => break,
@@ -207,9 +212,11 @@ impl BilingualGenerator {
                     "Could not Get primary_entries for primary_language.".to_string(),
                 ),
             )?;
-            let empty_map: HashMap<EntryId, LastTextValue> = HashMap::new();
+            let empty_map: IndexMap<EntryId, LastTextValue> = IndexMap::new();
             let secondary_entries = file_data.get(&secondary_lang).unwrap_or(&empty_map);
-
+            let english_entries = file_data
+                .get(&Language("English".to_string()))
+                .unwrap_or(&empty_map);
             // Build XML content
             let mut rows = Vec::new();
             for (entry_id, primary_text) in primary_entries {
@@ -217,10 +224,13 @@ impl BilingualGenerator {
                     .get(entry_id)
                     .map(|lv| lv.0.as_str())
                     .unwrap_or("");
-
+                let english_text = english_entries
+                    .get(entry_id)
+                    .map(|lv| lv.0.as_str())
+                    .unwrap_or("");
                 rows.push(format!(
                     "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{} / {}</Cell></Row>",
-                    entry_id.0, primary_text.0, primary_text.0, secondary_text
+                    entry_id.0, english_text, primary_text.0, secondary_text
                 ));
             }
 
@@ -233,43 +243,44 @@ impl BilingualGenerator {
             })?;
         }
 
-        match create_new_pak(xml_output_set, &xml_output_dir, primary_language) {
+        match Self::create_new_pak(xml_output_set, &xml_output_dir, primary_language) {
             Ok(_) => Ok(xml_output_dir),
             Err(_) => Err(BilingualGeneratorError::PakCreationFailed),
         }
     }
-}
-fn create_new_pak(
-    files: Vec<PathBuf>,
-    output_dir: &Path,
-    primary_language: &str,
-) -> Result<(), BilingualGeneratorError> {
-    let pak_name = format!("{}_xml.pak", primary_language);
-    let pak_path = output_dir.join(pak_name);
+    pub fn create_new_pak(
+        files: Vec<PathBuf>,
+        output_dir: &Path,
+        primary_language: &str,
+    ) -> Result<(), BilingualGeneratorError> {
+        let pak_name = format!("{}_xml.pak", primary_language);
+        let pak_path = output_dir.join(pak_name);
 
-    let file = File::create(&pak_path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-    let mut zip = ZipWriter::new(file);
-    let options: FileOptions<'_, ExtendedFileOptions> =
-        FileOptions::default().compression_method(CompressionMethod::Stored);
+        let file =
+            File::create(&pak_path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+        let mut zip = ZipWriter::new(file);
+        let options: FileOptions<'_, ExtendedFileOptions> =
+            FileOptions::default().compression_method(CompressionMethod::Deflated);
 
-    for path in files {
-        let file_name = path
-            .file_name()
-            .ok_or(BilingualGeneratorError::PakCreationFailed)?;
-        let file_name_str = file_name
-            .to_str()
-            .ok_or(BilingualGeneratorError::PakCreationFailed)?;
+        for path in files {
+            let file_name = path
+                .file_name()
+                .ok_or(BilingualGeneratorError::PakCreationFailed)?;
+            let file_name_str = file_name
+                .to_str()
+                .ok_or(BilingualGeneratorError::PakCreationFailed)?;
 
-        zip.start_file(file_name_str, options.clone())
+            zip.start_file(file_name_str, options.clone())
+                .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+            let content =
+                std::fs::read(&path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+            zip.write_all(&content)
+                .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+        }
+
+        zip.finish()
             .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-        let content =
-            std::fs::read(&path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-        zip.write_all(&content)
-            .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
+
+        Ok(())
     }
-
-    zip.finish()
-        .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-
-    Ok(())
 }

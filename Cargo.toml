@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 directories = "6.0.0"
+indexmap = "2.8.0"
 quick-xml = "0.37.4"
 regex = "1.11.1"
 winreg = "0.55.0"
