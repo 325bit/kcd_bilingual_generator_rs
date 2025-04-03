@@ -10,3 +10,17 @@ quick-xml = "0.37.4"
 regex = "1.11.1"
 winreg = "0.55.0"
 zip = "2.5.0"
+
+# [profile.dev]
+# lto = true
+
+[profile.release]
+opt-level = 3
+debug = true
+debug-assertions = false
+overflow-checks = false
+# lto = true
+panic = 'unwind'
+incremental = false
+codegen-units = 1
+rpath = false

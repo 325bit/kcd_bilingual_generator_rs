@@ -193,12 +193,12 @@ impl BilingualGenerator {
         // Prepare language identifiers
         let primary_lang = Language(primary_language.to_string());
         let secondary_lang = Language(secondary_language.to_string());
-
+        // Define separators
+        let separator_slash = " / ";
+        let separator_newline = "\\n";
         // Process each XML file
         for file_name in &self.files_to_process {
             let xml_file = XmlFile(file_name.clone());
-            // println!("file name = {}", file_name);
-            // Get data for this specific XML file
             let file_data = self.all_data.get(&xml_file).ok_or(
                 BilingualGeneratorError::XmlProcessingFailed(format!(
                     "Could not find the required XML file: {}",
@@ -217,20 +217,118 @@ impl BilingualGenerator {
             let english_entries = file_data
                 .get(&Language("English".to_string()))
                 .unwrap_or(&empty_map);
+
             // Build XML content
             let mut rows = Vec::new();
             for (entry_id, primary_text) in primary_entries {
                 let secondary_text = secondary_entries
                     .get(entry_id)
                     .map(|lv| lv.0.as_str())
-                    .unwrap_or("");
+                    .unwrap_or("MISSING");
                 let english_text = english_entries
                     .get(entry_id)
                     .map(|lv| lv.0.as_str())
-                    .unwrap_or("");
+                    .unwrap_or("MISSING");
+
+                let combined_text = if file_name == "text_ui_menus.xml" {
+                    let words_count = if primary_text.0 != "MISSING" {
+                        primary_text.0.split_whitespace().count()
+                    } else {
+                        0
+                    };
+
+                    if !entry_id.0.contains("ui_helpoverlay") {
+                        if entry_id.0.contains("ui_loading") || entry_id.0.contains("codex_cont") {
+                            if secondary_text != "MISSING" {
+                                format!(
+                                    "{} {} {}",
+                                    primary_text.0, separator_newline, secondary_text
+                                )
+                            } else {
+                                primary_text.0.clone()
+                            }
+                        } else if words_count < 3 {
+                            primary_text.0.clone()
+                        } else {
+                            if secondary_text != "MISSING" {
+                                format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
+                            } else {
+                                primary_text.0.clone()
+                            }
+                        }
+                    } else {
+                        primary_text.0.clone()
+                    }
+                } else if file_name == "text_ui_dialog.xml" {
+                    if secondary_text != "MISSING" {
+                        format!(
+                            "{} {} {}",
+                            primary_text.0, separator_newline, secondary_text
+                        )
+                    } else {
+                        format!("{} {} {}", primary_text.0, separator_newline, english_text)
+                    }
+                } else if file_name == "text_ui_items.xml" {
+                    if (entry_id.0.contains("_step_")
+                        && !entry_id.0.contains("_step_1")
+                        && primary_text.0.len() >= 10)
+                        || (entry_id.0.contains("_step_1")
+                            && (entry_id.0.contains("scatter")
+                                || entry_id.0.contains("longWeak")
+                                || entry_id.0.contains("bane")))
+                    {
+                        primary_text.0.clone()
+                    } else if primary_text.0.len() >= 15 {
+                        if secondary_text != "MISSING" {
+                            format!(
+                                "{} {} {}",
+                                primary_text.0, separator_newline, secondary_text
+                            )
+                        } else {
+                            primary_text.0.clone()
+                        }
+                    } else {
+                        if secondary_text != "MISSING" {
+                            format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
+                        } else {
+                            primary_text.0.clone()
+                        }
+                    }
+                } else if file_name == "text_ui_soul.xml" {
+                    if primary_text.0.len() <= 6 {
+                        if secondary_text != "MISSING" {
+                            format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
+                        } else {
+                            primary_text.0.clone()
+                        }
+                    } else if (entry_id.0.contains("buff_")
+                        && entry_id.0.contains("_desc")
+                        && !entry_id.0.contains("drunkenness_desc"))
+                        || (entry_id.0.contains("perk_") && entry_id.0.contains("_desc"))
+                    {
+                        if secondary_text != "MISSING" {
+                            format!(
+                                "{} {} {}",
+                                primary_text.0, separator_newline, secondary_text
+                            )
+                        } else {
+                            primary_text.0.clone()
+                        }
+                    } else {
+                        primary_text.0.clone()
+                    }
+                } else {
+                    // For all other files
+                    if secondary_text != "MISSING" {
+                        format!("{} {} {}", primary_text.0, separator_slash, secondary_text)
+                    } else {
+                        format!("{} {} {}", primary_text.0, separator_slash, english_text)
+                    }
+                };
+
                 rows.push(format!(
-                    "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{} / {}</Cell></Row>",
-                    entry_id.0, english_text, primary_text.0, secondary_text
+                    "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{}</Cell></Row>",
+                    entry_id.0, primary_text.0, combined_text
                 ));
             }
 
