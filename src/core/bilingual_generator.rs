@@ -82,7 +82,7 @@ impl BilingualGenerator {
         let bilingual_set_file = File::open(&bilingual_set_dir).map_err(|_| {
             BilingualGeneratorError::InvalidBilingualSet(format!(
                 "No bilingual_set.txt in {:?}",
-                working_dir
+                bilingual_set_dir
             ))
         })?;
         let reader = BufReader::new(bilingual_set_file);
@@ -109,20 +109,6 @@ impl BilingualGenerator {
         }
         Ok(bilingual_set)
     }
-    // Main workflow method
-    // pub fn generate_bilingual_resources(&mut self) -> Result<(), BilingualGeneratorError> {
-    //     // Initialize
-    //     // BilingualGenerator::init()?;
-    //     // BilingualGenerator::acquire_bilingual_set()?;
-
-    //     // reading the bilingual set that need genarated into generated_bilingual_set
-
-    //     // Process XML files
-    //     // for (primary_language, secondary_language) in generated_bilingual_set
-    //     // self.process_single_bilingual(primary_language, secondary_language)?;
-
-    //     Ok(())
-    // }
 
     /// Reads XML files from the pak files located in the Localization folder and stores the Entry id
     /// and secondary text (last cell) for each XML file into self.all_data.

@@ -1,7 +1,7 @@
 use std::{fmt, io};
 
 pub enum BilingualGeneratorError {
-    GameNotFound,
+    // GameNotFound,
     InvalidBilingualSet(String),
     PakExtractionFailed,
     XmlProcessingFailed(String),
@@ -12,7 +12,7 @@ pub enum BilingualGeneratorError {
 impl fmt::Display for BilingualGeneratorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BilingualGeneratorError::GameNotFound => write!(f, "Game installation not found"),
+            // BilingualGeneratorError::GameNotFound => write!(f, "Game installation not found"),
             BilingualGeneratorError::InvalidBilingualSet(ref msg) => {
                 write!(f, "Invalid Bilingual Set Format: {}", msg)
             }
@@ -34,7 +34,7 @@ impl fmt::Display for BilingualGeneratorError {
 impl fmt::Debug for BilingualGeneratorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BilingualGeneratorError::GameNotFound => write!(f, "GameNotFound"),
+            // BilingualGeneratorError::GameNotFound => write!(f, "GameNotFound"),
             BilingualGeneratorError::InvalidBilingualSet(ref msg) => {
                 write!(f, "Invalid Bilingual Set Format: {}", msg)
             }
