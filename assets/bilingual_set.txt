@@ -1,7 +1,7 @@
 Chineset + English
 Chineses + English
 Chineses + French
-German + Chineses
+Chineses + German
 Chineses + Spanish
-Spanish + Czech
-Spanish + Japanese
+Chineses + Czech
+Chineses + Japanese

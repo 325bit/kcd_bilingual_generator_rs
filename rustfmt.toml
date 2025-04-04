@@ -1,0 +1,5 @@
+# rustfmt.toml
+
+# Increase the maximum line length
+# Default is 100. Try 120 or higher if needed.
+max_width = 155
