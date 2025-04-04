@@ -1,2 +1,7 @@
+Chineset + English
 Chineses + English
 Chineses + French
+German + Chineses
+Chineses + Spanish
+Spanish + Czech
+Spanish + Japanese

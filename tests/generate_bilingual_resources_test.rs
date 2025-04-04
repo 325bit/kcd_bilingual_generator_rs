@@ -28,7 +28,7 @@ mod tests {
         }
     }
 }
-//cargo.exe test --release --package kcd_bilingual_generator_rust --test generate_bilingual_resources_test -- tests::generate_bilingual_resources_test --exact --show-output
+//cargo test --release --package kcd_bilingual_generator_rust --test generate_bilingual_resources_test -- tests::generate_bilingual_resources_test --exact --show-output
 
 /* ------------------------------------------------------------------------------------------------------------------------------- */
 // Processor:       Intel 12th Generation Core i5-12400F Six Core
@@ -39,27 +39,34 @@ mod tests {
 /* ----------------------------------------------------------test result (dev mode)---------------------------------------------------------- */
 // test tests::generate_bilingual_resources_test ... ok
 
-// running 1 test
 // successes:
 
 // ---- tests::generate_bilingual_resources_test stdout ----
 // primary_language = Chineses, secondary_language = English
 // primary_language = Chineses, secondary_language = French
+// primary_language = Chineses, secondary_language = German
+// primary_language = Chineses, secondary_language = Spanish
+// primary_language = Chineses, secondary_language = Czech
+// primary_language = Chineses, secondary_language = Japanese
 
 // successes:
 //     tests::generate_bilingual_resources_test
 
-// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.49s
-
+// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 35.67s
+/* ----------------------------------------------------------test result (release mode)---------------------------------------------------------- */
 // test tests::generate_bilingual_resources_test ... ok
 
 // successes:
-/* ----------------------------------------------------------test result (release mode)---------------------------------------------------------- */
+
 // ---- tests::generate_bilingual_resources_test stdout ----
 // primary_language = Chineses, secondary_language = English
 // primary_language = Chineses, secondary_language = French
+// primary_language = Chineses, secondary_language = German
+// primary_language = Chineses, secondary_language = Spanish
+// primary_language = Chineses, secondary_language = Czech
+// primary_language = Chineses, secondary_language = Japanese
 
 // successes:
 //     tests::generate_bilingual_resources_test
 
-// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.68s
+// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.80s

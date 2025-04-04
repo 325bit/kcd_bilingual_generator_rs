@@ -39,17 +39,20 @@ mod tests {
 /* ----------------------------------------------------------test result (dev mode)---------------------------------------------------------- */
 // test tests::generate_bilingual_resources_multithread_test ... ok
 
-// running 1 test
 // successes:
 
 // ---- tests::generate_bilingual_resources_multithread_test stdout ----
 // primary_language = Chineses, secondary_language = English
+// primary_language = Chineses, secondary_language = Spanish
 // primary_language = Chineses, secondary_language = French
+// primary_language = Chineses, secondary_language = Czech
+// primary_language = Chineses, secondary_language = German
+// primary_language = Chineses, secondary_language = Japanese
 
 // successes:
 //     tests::generate_bilingual_resources_multithread_test
 
-// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.51s
+// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.74s
 /* ----------------------------------------------------------test result (release mode)---------------------------------------------------------- */
 // test tests::generate_bilingual_resources_multithread_test ... ok
 
@@ -58,8 +61,12 @@ mod tests {
 // ---- tests::generate_bilingual_resources_multithread_test stdout ----
 // primary_language = Chineses, secondary_language = English
 // primary_language = Chineses, secondary_language = French
+// primary_language = Chineses, secondary_language = Spanish
+// primary_language = Chineses, secondary_language = Czech
+// primary_language = Chineses, secondary_language = Japanese
+// primary_language = Chineses, secondary_language = German
 
 // successes:
 //     tests::generate_bilingual_resources_multithread_test
 
-// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.54s
+// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.87s

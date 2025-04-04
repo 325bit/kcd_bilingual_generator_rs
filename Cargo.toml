@@ -20,7 +20,6 @@ zip = "2.5.0"
 serial_test = "2.0"
 egui_extras = { version = "0.31.1", features = ["all_loaders"] }
 
-# winres = "0.1"
 # [profile.dev]
 # lto = true
 

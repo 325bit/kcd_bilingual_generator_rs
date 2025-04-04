@@ -15,6 +15,11 @@ mod tests {
         let mut generator = BilingualGenerator::init()?;
         generator.game_path = game_path.to_path_buf();
         println!("Generator's Workspace is :{:?}", generator.working_dir);
+        let _ = generator.acquire_bilingual_set();
+        println!(
+            "generator.acquire_bilingual_set = {:?}",
+            generator.language_to_process
+        );
         generator.read_xml_from_paks().unwrap_or_else(|e| {
             panic!("Problem reading xml from paks, error:{e}");
         });
@@ -31,7 +36,7 @@ mod tests {
         // let content = xml_data.get(&entry_id).unwrap();
         // println!("content it get = {}", content.0);
         // Call the read_xml_from_paks function to parse XML files
-        match generator.process_single_bilingual("Chineses", "English") {
+        match generator.process_single_bilingual("Chineset", "English") {
             Ok(_) => Ok(()),
             Err(e) => return Err(e),
         }
