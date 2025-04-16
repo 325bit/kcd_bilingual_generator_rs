@@ -51,7 +51,7 @@ English + Japanese v2.51
 - The `XXX_xml.pak` filename (`XXX` = language) determines which in-game language the subtitles replace.  
   - Example: Renaming to `English_xml.pak` will switch subtitles to English.  
 - If you see **square characters (口口)**, the current font does not fully support the target language.  
-  - **Fix this yourself**: Follow the tutorial in the [Better Chinese Font nexus mod posts](https://www.nexusmods.com/kingdomcomedeliverance2/mods/53?tab=posts) to create a custom font mod. Do not report this as an issue here.  
+  - **Fix this yourself**: Go to [Better Chinese Font  mod](https://www.nexusmods.com/kingdomcomedeliverance2/mods/53) to create/download a custom font mod. Do not report this as an issue here.  
 
 ### 5. Install the Mod  
 Move your renamed mod folder into the `Mods` directory in your KC:D game root folder and Launch the game.

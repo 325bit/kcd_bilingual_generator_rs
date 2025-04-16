@@ -44,7 +44,7 @@
 
 #### 注意事项：  
 - `XXX_xml.pak` 文件名中的 `XXX`（语言）决定替换游戏中的哪种语言。比如，改为 `English_xml.pak` 时，这个.pak文件会替换游戏的英文文本。  
-- 如果出现口口，说明当前语言的字体不支持口口语言的完口显口。你应该去Better Chinese Font mod的[评论区](https://www.nexusmods.com/kingdomcomedeliverance2/mods/53?tab=posts)，按作者的教程自己搓个字体mod，而不是来找我报错，口口跟我没关系。 
+- 如果出现口口，说明当前语言的字体不支持口口语言的完口显口。你应该去[Better Chinese Font mod](https://www.nexusmods.com/kingdomcomedeliverance2/mods/53)下个字体，而不是来找我报错，口口跟我没关系。 
 
 ### 5. 安装 Mod  
 将重命名后的 Mod 文件夹放入游戏的 `Mods` 目录（位于游戏根目录下），启动游戏即可。  

@@ -83,8 +83,9 @@ impl BilingualGenerator {
             .map_err(|_| BilingualGeneratorError::InvalidBilingualSet(format!("No bilingual_set.txt in {:?}", bilingual_set_dir)))?;
         let reader = BufReader::new(bilingual_set_file);
         let mut bilingual_set: Vec<(String, String)> = vec![];
+        // start reading
         for (_, line_result) in reader.lines().enumerate() {
-            let line: String = line_result.map_err(|_| BilingualGeneratorError::InvalidBilingualSet("what".to_string()))?;
+            let line: String = line_result.map_err(|_| BilingualGeneratorError::InvalidBilingualSet("Fail to get String.".to_string()))?;
             let trimmed_line = line.trim();
 
             // Skip empty lines
@@ -198,7 +199,7 @@ impl BilingualGenerator {
         // Define separators
         let separator_slash = "/";
         let separator_newline = "\\n";
-
+        let menutext_too_long = ["ui_state_health_desc", "ui_state_hunger_desc", "ui_DerivStat_MaxStamina_desc"];
         // Process each XML file in parallel
         self.files_to_process.par_iter().for_each(|file_name| {
             let xml_file = XmlFile(file_name.clone());
@@ -231,13 +232,15 @@ impl BilingualGenerator {
                                     if !entry_id.0.contains("ui_helpoverlay") {
                                         match true {
                                             _ if entry_id.0.contains("ui_loading") || entry_id.0.contains("codex_cont") => {
-                                                if secondary_text != "MISSING" {
-                                                    format!("{}{}{}", primary_text.0, separator_newline, secondary_text)
-                                                } else {
-                                                    primary_text.0.clone()
-                                                }
+                                                secondary_text_combined(primary_text, secondary_text, separator_newline)
                                             }
-                                            _ if primary_text.0.chars().count() <= 4 => primary_text.0.clone(),
+                                            _ if primary_text.0.chars().count() <= 4 || menutext_too_long.contains(&&*entry_id.0) => {
+                                                primary_text.0.clone()
+                                            }
+                                            _ if primary_text.0.chars().count() >= 20 => {
+                                                secondary_text_combined(primary_text, secondary_text, separator_newline)
+                                            }
+
                                             _ => secondary_text_combined(primary_text, secondary_text, separator_slash),
                                         }
                                     } else {
