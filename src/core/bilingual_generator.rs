@@ -1,5 +1,8 @@
-use super::bilingual_generator_errors::BilingualGeneratorError;
-use super::path_finder::PathFinder;
+use super::{
+    bilingual_generator_errors::BilingualGeneratorError,
+    path_finder::PathFinder,
+    util::{create_new_pak, secondary_text_combined},
+};
 use indexmap::IndexMap;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -7,14 +10,11 @@ use rayon::prelude::*;
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, Read, Write},
-    path::{Path, PathBuf},
+    io::{BufRead, BufReader, Read},
+    path::PathBuf,
     sync::Mutex,
 };
-use zip::{
-    write::{ExtendedFileOptions, FileOptions},
-    CompressionMethod, ZipArchive, ZipWriter,
-};
+use zip::ZipArchive;
 
 // Main generator struct that coordinates all operations
 #[derive(Debug)]
@@ -329,7 +329,7 @@ impl BilingualGenerator {
         // Get locked access to the path list
         let generated_xml_paths: Vec<PathBuf> = xml_output_set.into_inner().unwrap();
         // After parallel processing, merge results and proceed
-        match Self::create_new_pak(generated_xml_paths.clone(), &xml_output_dir, primary_language) {
+        match create_new_pak(generated_xml_paths.clone(), &xml_output_dir, primary_language) {
             Ok(_) => {
                 // Parallel file deletion
                 generated_xml_paths.par_iter().for_each(|path| {
@@ -342,35 +342,5 @@ impl BilingualGenerator {
             }
             Err(_) => Err(BilingualGeneratorError::PakCreationFailed),
         }
-    }
-
-    pub fn create_new_pak(files: Vec<PathBuf>, output_dir: &Path, primary_language: &str) -> Result<(), BilingualGeneratorError> {
-        let pak_name = format!("{}_xml.pak", primary_language);
-        let pak_path = output_dir.join(pak_name);
-
-        let file = File::create(&pak_path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-        let mut zip = ZipWriter::new(file);
-        let options: FileOptions<'_, ExtendedFileOptions> = FileOptions::default().compression_method(CompressionMethod::Deflated);
-
-        for path in files {
-            let file_name = path.file_name().ok_or(BilingualGeneratorError::PakCreationFailed)?;
-            let file_name_str = file_name.to_str().ok_or(BilingualGeneratorError::PakCreationFailed)?;
-
-            zip.start_file(file_name_str, options.clone())
-                .map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-            let content = std::fs::read(&path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-            zip.write_all(&content).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-        }
-
-        zip.finish().map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
-
-        Ok(())
-    }
-}
-fn secondary_text_combined(primary_text: &LastTextValue, secondary_text: &str, separator: &str) -> String {
-    if secondary_text != "MISSING" {
-        format!("{}{}{}", primary_text.0, separator, secondary_text)
-    } else {
-        primary_text.0.clone()
     }
 }

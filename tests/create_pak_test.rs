@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use kcd_bilingual_generator_rust::core::{
-        bilingual_generator::BilingualGenerator,
-        bilingual_generator_errors::BilingualGeneratorError, path_finder::path_finder::PathFinder,
+        bilingual_generator::BilingualGenerator, bilingual_generator_errors::BilingualGeneratorError, path_finder::path_finder::PathFinder,
+        util::create_new_pak,
     };
     use std::path::PathBuf;
 
@@ -20,12 +20,8 @@ mod tests {
             let xml_output_path = xml_output_dir.join(file_name);
             xml_output_set.push(xml_output_path.clone());
         }
-        let result = BilingualGenerator::create_new_pak(
-            xml_output_set,
-            &generator.working_dir.join("bilingual_xml"),
-            "Chineses",
-        )
-        .map_err(|_| BilingualGeneratorError::PakCreationFailed);
+        let result = create_new_pak(xml_output_set, &generator.working_dir.join("bilingual_xml"), "Chineses")
+            .map_err(|_| BilingualGeneratorError::PakCreationFailed);
         match result {
             Ok(_) => Ok(()),
             Err(e) => Err(e),

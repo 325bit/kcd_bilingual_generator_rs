@@ -12,12 +12,8 @@ mod tests {
         match generator.read_xml_from_paks() {
             Ok(_) => {
                 for (primary_language, secondary_language) in bilingual_set {
-                    println!(
-                        "primary_language = {}, secondary_language = {}",
-                        primary_language, secondary_language
-                    );
-                    match generator.process_single_bilingual(&primary_language, &secondary_language)
-                    {
+                    println!("primary_language = {}, secondary_language = {}", primary_language, secondary_language);
+                    match generator.process_single_bilingual(&primary_language, &secondary_language) {
                         Ok(_) => continue,
                         Err(e) => return Err(e),
                     }
@@ -42,6 +38,7 @@ mod tests {
 // successes:
 
 // ---- tests::generate_bilingual_resources_test stdout ----
+// primary_language = Chineset, secondary_language = English
 // primary_language = Chineses, secondary_language = English
 // primary_language = Chineses, secondary_language = French
 // primary_language = Chineses, secondary_language = German
@@ -52,13 +49,14 @@ mod tests {
 // successes:
 //     tests::generate_bilingual_resources_test
 
-// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 35.67s
+// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 37.13s
 /* ----------------------------------------------------------test result (release mode)---------------------------------------------------------- */
 // test tests::generate_bilingual_resources_test ... ok
 
 // successes:
 
 // ---- tests::generate_bilingual_resources_test stdout ----
+// primary_language = Chineset, secondary_language = English
 // primary_language = Chineses, secondary_language = English
 // primary_language = Chineses, secondary_language = French
 // primary_language = Chineses, secondary_language = German
@@ -69,4 +67,4 @@ mod tests {
 // successes:
 //     tests::generate_bilingual_resources_test
 
-// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.80s
+// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.89s

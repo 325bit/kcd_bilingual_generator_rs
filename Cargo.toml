@@ -6,6 +6,13 @@ edition = "2021"
 
 [build-dependencies]
 
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+] } # Ensure tokio test features are enabled
+
 [dependencies]
 directories = "6.0.0"
 eframe = "0.31.1"
@@ -19,6 +26,8 @@ winreg = "0.55.0"
 zip = "2.5.0"
 serial_test = "2.0"
 egui_extras = { version = "0.31.1", features = ["all_loaders"] }
+tokio = { version = "1.44.2", features = ["full"] }
+thiserror = "2.0.12"
 
 # [profile.dev]
 # lto = true
