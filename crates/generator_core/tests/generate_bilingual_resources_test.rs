@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use kcd_bilingual_generator_rust::core::{
+    use generator_core::{
         bilingual_generator::{BilingualGenerator /*, EntryId, Language, XmlFile */},
         bilingual_generator_errors::BilingualGeneratorError,
     };

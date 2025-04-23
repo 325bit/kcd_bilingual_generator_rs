@@ -1,0 +1,12 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+eframe = "0.31.1"
+egui = "0.31.1"
+rayon = "1.10.0"
+path_finder = { path = "../path_finder" }
+generator_core = { path = "../generator_core" }
+rfd = "0.15.3"

@@ -1,6 +1,6 @@
 # --- Configuration ---
 $NumRuns = 10
-$PackageName = "kcd_bilingual_generator_rust"
+$PackageName = "generator_core"
 # $TestFunctionName = "test_generate_multithread"
 $TestFunctionName = "test_generate_async"
 # Important: Ensure cargo is in your PATH

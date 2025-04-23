@@ -1,12 +1,11 @@
-use super::{
-    bilingual_generator_errors::BilingualGeneratorError,
-    path_finder::PathFinder,
-    util::{create_new_pak, secondary_text_combined, SEPARATOR_NEWLINE, SEPARATOR_SLASH},
-};
+use crate::util::{SEPARATOR_NEWLINE, SEPARATOR_SLASH, create_new_pak, secondary_text_combined};
+
+use super::bilingual_generator_errors::BilingualGeneratorError;
 use faststr::FastStr;
 use indexmap::IndexMap;
-use quick_xml::events::Event;
+use path_finder::PathFinder;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 use rayon::prelude::*;
 use std::{
     collections::HashMap,
@@ -79,7 +78,7 @@ impl BilingualGenerator {
     }
     pub fn acquire_bilingual_set(&mut self) -> Result<Vec<(String, String)>, BilingualGeneratorError> {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::new());
-        let bilingual_set_dir = working_dir.join("assets\\bilingual_set.txt");
+        let bilingual_set_dir = working_dir.join("..\\..\\assets\\bilingual_set.txt");
         let bilingual_set_file = File::open(&bilingual_set_dir)
             .map_err(|_| BilingualGeneratorError::InvalidBilingualSet(format!("No bilingual_set.txt in {:?}", bilingual_set_dir)))?;
         let reader = BufReader::new(bilingual_set_file);

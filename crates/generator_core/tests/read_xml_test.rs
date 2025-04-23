@@ -1,10 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use kcd_bilingual_generator_rust::core::{
-        bilingual_generator::{BilingualGenerator, EntryId, Language, XmlFile},
-        path_finder::PathFinder,
-    };
-
+    use generator_core::bilingual_generator::{BilingualGenerator, EntryId, Language, XmlFile};
+    use path_finder::PathFinder;
     #[test]
     fn read_xml_test() -> Result<(), Box<dyn std::error::Error>> {
         // Use the path from PathFinder to locate the actual game path

@@ -6,8 +6,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use zip::{
-    write::{ExtendedFileOptions, FileOptions},
     CompressionMethod, ZipWriter,
+    write::{ExtendedFileOptions, FileOptions},
 };
 // Define separators
 // Use actual newline '\n' if the target system/game expects that.

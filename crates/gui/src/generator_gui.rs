@@ -3,10 +3,7 @@ use path_finder::PathFinder;
 use rayon::prelude::*;
 use std::{path::PathBuf, time::Instant};
 
-use crate::core::{
-    bilingual_generator::BilingualGenerator, bilingual_generator_errors::BilingualGeneratorError,
-    path_finder::path_finder,
-};
+use generator_core::{bilingual_generator::BilingualGenerator, bilingual_generator_errors::BilingualGeneratorError};
 pub struct GuiBilingualPakGenerator {
     game_location: PathBuf,
     messages: String,
@@ -33,8 +30,7 @@ impl eframe::App for GuiBilingualPakGenerator {
             let mut fonts = egui::FontDefinitions::default();
             fonts.font_data.insert(
                 "Times New Roman".to_owned(),
-                egui::FontData::from_static(include_bytes!("../../assets/times new roman.ttf"))
-                    .into(),
+                egui::FontData::from_static(include_bytes!("../../../assets/times new roman.ttf")).into(),
             );
             fonts
                 .families
@@ -53,22 +49,10 @@ impl eframe::App for GuiBilingualPakGenerator {
 
             // Adjust general text sizes
             style.text_styles = [
-                (
-                    egui::TextStyle::Heading,
-                    egui::FontId::new(24.0, egui::FontFamily::Proportional),
-                ),
-                (
-                    egui::TextStyle::Body,
-                    egui::FontId::new(18.0, egui::FontFamily::Proportional),
-                ),
-                (
-                    egui::TextStyle::Button,
-                    egui::FontId::new(18.0, egui::FontFamily::Proportional),
-                ),
-                (
-                    egui::TextStyle::Small,
-                    egui::FontId::new(14.0, egui::FontFamily::Proportional),
-                ),
+                (egui::TextStyle::Heading, egui::FontId::new(24.0, egui::FontFamily::Proportional)),
+                (egui::TextStyle::Body, egui::FontId::new(18.0, egui::FontFamily::Proportional)),
+                (egui::TextStyle::Button, egui::FontId::new(18.0, egui::FontFamily::Proportional)),
+                (egui::TextStyle::Small, egui::FontId::new(14.0, egui::FontFamily::Proportional)),
             ]
             .into();
             style.spacing.interact_size = egui::Vec2::new(150.0, 40.0);
@@ -118,36 +102,29 @@ impl eframe::App for GuiBilingualPakGenerator {
             ui.vertical(|ui| {
                 ui.add_space(20.0);
                 ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(
-                        ui.available_size(),
-                        egui::Layout::top_down(egui::Align::Center),
-                        |ui| {
-                            if ui.button("Generate Bilingual Pak").clicked() {
-                                self.messages.push_str("Starting generation process...\n");
-                                let start_time = Instant::now();
-                                match self.generate_bilingual_resources() {
-                                    Ok(generator_result_set) => {
-                                        let duration = start_time.elapsed();
+                    ui.allocate_ui_with_layout(ui.available_size(), egui::Layout::top_down(egui::Align::Center), |ui| {
+                        if ui.button("Generate Bilingual Pak").clicked() {
+                            self.messages.push_str("Starting generation process...\n");
+                            let start_time = Instant::now();
+                            match self.generate_bilingual_resources() {
+                                Ok(generator_result_set) => {
+                                    let duration = start_time.elapsed();
 
-                                        for message in generator_result_set {
-                                            self.messages.push_str(&message);
-                                            self.messages.push('\n'); // Better to use single character push
-                                        }
+                                    for message in generator_result_set {
+                                        self.messages.push_str(&message);
+                                        self.messages.push('\n'); // Better to use single character push
+                                    }
 
-                                        // Format the duration with 2 decimal places
-                                        self.messages.push_str(&format!(
-                                            "in {:.2} seconds",
-                                            duration.as_secs_f64()
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        // println!("{}", e);
-                                        self.messages.push_str(&format!("{:?}", e));
-                                    }
+                                    // Format the duration with 2 decimal places
+                                    self.messages.push_str(&format!("in {:.2} seconds", duration.as_secs_f64()));
+                                }
+                                Err(e) => {
+                                    // println!("{}", e);
+                                    self.messages.push_str(&format!("{:?}", e));
                                 }
                             }
-                        },
-                    );
+                        }
+                    });
                 });
                 ui.add_space(20.0);
             });
@@ -156,15 +133,13 @@ impl eframe::App for GuiBilingualPakGenerator {
             // Messages Area
             ui.vertical(|ui| {
                 ui.label("Messages:");
-                egui::ScrollArea::vertical()
-                    .max_height(150.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.messages)
-                                .font(egui::FontId::new(14.0, egui::FontFamily::Monospace))
-                                .desired_width(f32::INFINITY),
-                        );
-                    });
+                egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.messages)
+                            .font(egui::FontId::new(14.0, egui::FontFamily::Monospace))
+                            .desired_width(f32::INFINITY),
+                    );
+                });
             });
         });
     }
@@ -180,16 +155,10 @@ impl GuiBilingualPakGenerator {
             .par_iter()
             .map(|(primary_language, secondary_language)| {
                 // Perform processing first
-                let result =
-                    generator.process_single_bilingual(primary_language, secondary_language);
+                let result = generator.process_single_bilingual(primary_language, secondary_language);
 
                 // Then create message (after potential error)
-                result.map(|_| {
-                    format!(
-                        "primary_language = {}, secondary_language = {}",
-                        primary_language, secondary_language
-                    )
-                })
+                result.map(|_| format!("primary_language = {}, secondary_language = {}", primary_language, secondary_language))
             })
             .collect::<Result<Vec<String>, _>>()?;
 

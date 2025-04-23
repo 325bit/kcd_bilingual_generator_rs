@@ -1,13 +1,13 @@
 #[cfg(test)]
 mod tests {
-    use kcd_bilingual_generator_rust::core::{
+    use generator_core::{
         bilingual_generator::{BilingualGenerator /*, EntryId, Language, XmlFile */},
         bilingual_generator_errors::BilingualGeneratorError,
     };
     use rayon::prelude::*;
 
     #[test]
-    //cargo test --release --package kcd_bilingual_generator_rust --test test_generate_multithread -- tests::test_generate_multithread --exact --show-output
+    //cargo test --release --package generator_core --test test_generate_multithread -- tests::test_generate_multithread --exact --show-output
     fn test_generate_multithread() -> Result<(), BilingualGeneratorError> {
         let mut generator = BilingualGenerator::init()?;
         let bilingual_set = generator.acquire_bilingual_set()?;

@@ -1,9 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use kcd_bilingual_generator_rust::core::{
-        bilingual_generator::BilingualGenerator, bilingual_generator_errors::BilingualGeneratorError, path_finder::path_finder::PathFinder,
-        util::create_new_pak,
-    };
+    use generator_core::{bilingual_generator::BilingualGenerator, bilingual_generator_errors::BilingualGeneratorError, util::create_new_pak};
+    use path_finder::PathFinder;
     use std::path::PathBuf;
 
     #[test]

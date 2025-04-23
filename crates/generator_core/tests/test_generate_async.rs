@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use kcd_bilingual_generator_rust::core::{
+    use generator_core::{
         bilingual_generator::{BilingualGenerator /*, EntryId, Language, XmlFile */},
         bilingual_generator_errors::BilingualGeneratorError,
     };
@@ -11,7 +11,7 @@ mod tests {
     // use std::path::PathBuf;
 
     #[tokio::test]
-    //cargo test --release --package kcd_bilingual_generator_rust --test test_generate_async -- tests::test_generate_async --exact --show-output
+    //cargo test --release --package generator_core --test test_generate_async -- tests::test_generate_async --exact --show-output
     async fn test_generate_async() -> Result<(), BilingualGeneratorError> {
         println!("--- Starting test_generate_bilingual_resources_async ---");
 

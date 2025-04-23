@@ -1,9 +1,10 @@
 [package]
 name = "kcd_bilingual_generator_rust"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 # build = "build.rs"
-
+[workspace]
+members = ["crates/gui", "crates/path_finder", "crates/generator_core"]
 [build-dependencies]
 
 [dev-dependencies]
@@ -14,21 +15,8 @@ tokio = { version = "1", features = [
 ] } # Ensure tokio test features are enabled
 
 [dependencies]
-directories = "6.0.0"
 eframe = "0.31.1"
-egui = "0.31.1"
-indexmap = "2.8.0"
-quick-xml = "0.37.4"
-rayon = "1.10.0"
-regex = "1.11.1"
-rfd = "0.15.3"
-winreg = "0.55.0"
-zip = "2.5.0"
-serial_test = "2.0"
-egui_extras = { version = "0.31.1", features = ["all_loaders"] }
-tokio = { version = "1.44.2", features = ["full"] }
-thiserror = "2.0.12"
-faststr = "0.2.31"
+gui = { path = "crates/gui" }
 
 # [profile.dev]
 # lto = true

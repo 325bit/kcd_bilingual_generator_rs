@@ -6,15 +6,14 @@ use std::{
     sync::Arc, // Use Arc for shared data
 };
 
-use crate::core::{
+use super::{
     bilingual_generator::{BilingualGenerator, EntryId, Language, LastTextValue, XmlFile},
     bilingual_generator_errors::BilingualGeneratorError,
-    util::{SEPARATOR_NEWLINE, SEPARATOR_SLASH},
+    util::{SEPARATOR_NEWLINE, SEPARATOR_SLASH, create_new_pak, secondary_text_combined},
 };
-
-use super::util::{create_new_pak, secondary_text_combined}; // Import the utility functions
+// Import the utility functions
 use indexmap::IndexMap;
-use quick_xml::{events::Event, Reader};
+use quick_xml::{Reader, events::Event};
 use rayon::prelude::*; // Keep for parallel cleanup if desired
 
 use tokio::{
@@ -67,7 +66,7 @@ impl BilingualGenerator {
                         e
                     );
                     continue; // Skip this file for this language
-                              // return Err(BilingualGeneratorError::PakExtractionFailed); // Alternative: fail entire language read
+                    // return Err(BilingualGeneratorError::PakExtractionFailed); // Alternative: fail entire language read
                 }
             };
 

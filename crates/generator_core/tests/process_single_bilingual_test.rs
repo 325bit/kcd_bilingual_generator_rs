@@ -1,11 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use kcd_bilingual_generator_rust::core::{
+    use generator_core::{
         bilingual_generator::{BilingualGenerator /*, EntryId, Language, XmlFile */},
         bilingual_generator_errors::BilingualGeneratorError,
-        path_finder::PathFinder,
     };
-
+    use path_finder::PathFinder;
     #[test]
     fn process_single_bilingual_test() -> Result<(), BilingualGeneratorError> {
         // Use the path from PathFinder to locate the actual game path
@@ -16,10 +15,7 @@ mod tests {
         generator.game_path = game_path.to_path_buf();
         println!("Generator's Workspace is :{:?}", generator.working_dir);
         let _ = generator.acquire_bilingual_set();
-        println!(
-            "generator.acquire_bilingual_set = {:?}",
-            generator.language_to_process
-        );
+        println!("generator.acquire_bilingual_set = {:?}", generator.language_to_process);
         generator.read_xml_from_paks().unwrap_or_else(|e| {
             panic!("Problem reading xml from paks, error:{e}");
         });

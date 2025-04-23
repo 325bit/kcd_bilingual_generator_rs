@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
 
-    use kcd_bilingual_generator_rust::core::path_finder::path_finder::PathFinder;
+    use path_finder::PathFinder;
 
     #[test]
     fn path_finder_test() {
