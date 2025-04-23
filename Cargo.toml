@@ -17,9 +17,9 @@ tokio = { version = "1", features = [
 [dependencies]
 eframe = "0.31.1"
 gui = { path = "crates/gui" }
+dotenv = "0.15"
+diesel = { version = "1.4", features = ["postgres"] }
 
-# [profile.dev]
-# lto = true
 
 [profile.release]
 opt-level = 3

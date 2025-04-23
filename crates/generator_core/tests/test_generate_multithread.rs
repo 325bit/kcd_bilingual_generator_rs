@@ -80,3 +80,9 @@ mod tests {
 //   2.170
 // Total time reported by Cargo across successful runs: 21.450s
 // Average time reported by Cargo per successful run: 2.145s
+
+/* ----------------------------------------------------------test result (release mode, With SQL)---------------------------------------------------------- */
+// successes:
+//     tests::test_generate_multithread
+
+// test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 28.84s
