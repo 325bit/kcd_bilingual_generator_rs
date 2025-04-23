@@ -7,7 +7,8 @@ mod tests {
     use rayon::prelude::*;
 
     #[test]
-    fn generate_bilingual_resources_multithread_test() -> Result<(), BilingualGeneratorError> {
+    //cargo test --release --package kcd_bilingual_generator_rust --test test_generate_multithread -- tests::test_generate_multithread --exact --show-output
+    fn test_generate_multithread() -> Result<(), BilingualGeneratorError> {
         let mut generator = BilingualGenerator::init()?;
         let bilingual_set = generator.acquire_bilingual_set()?;
 
@@ -21,7 +22,6 @@ mod tests {
         Ok(())
     }
 }
-//cargo test --release --package kcd_bilingual_generator_rust --test generate_bilingual_resources_multithread_test -- tests::generate_bilingual_resources_multithread_test --exact --show-output
 
 /* ------------------------------------------------------------------------------------------------------------------------------- */
 // Processor:       Intel 12th Generation Core i5-12400F Six Core
@@ -65,3 +65,18 @@ mod tests {
 //     tests::generate_bilingual_resources_multithread_test
 
 // test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.20s
+// --- Performance Summary ---
+// Successful runs: 10 / 10
+// Individual successful run times (seconds reported by Cargo):
+//   2.170
+//   2.120
+//   2.130
+//   2.170
+//   2.100
+//   2.110
+//   2.150
+//   2.170
+//   2.160
+//   2.170
+// Total time reported by Cargo across successful runs: 21.450s
+// Average time reported by Cargo per successful run: 2.145s

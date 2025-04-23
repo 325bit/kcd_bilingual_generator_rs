@@ -1,3 +1,5 @@
+use super::{bilingual_generator::LastTextValue, bilingual_generator_errors::BilingualGeneratorError};
+use faststr::FastStr;
 use std::{
     fs::File,
     io::Write,
@@ -7,14 +9,17 @@ use zip::{
     write::{ExtendedFileOptions, FileOptions},
     CompressionMethod, ZipWriter,
 };
+// Define separators
+// Use actual newline '\n' if the target system/game expects that.
+// Use escaped "\\n" if the target system expects the literal characters '\' and 'n'.
+pub static SEPARATOR_SLASH: &str = "/";
+pub static SEPARATOR_NEWLINE: &str = "\\n";
 
-use super::{bilingual_generator::LastTextValue, bilingual_generator_errors::BilingualGeneratorError};
-
-pub fn secondary_text_combined(primary_text: &LastTextValue, secondary_text: &str, separator: &str) -> String {
+pub fn secondary_text_combined(primary_text: &LastTextValue, secondary_text: &str, separator: &str) -> FastStr {
     if secondary_text != "MISSING" && !secondary_text.is_empty() {
-        format!("{}{}{}", primary_text.0, separator, secondary_text)
+        format!("{}{}{}", primary_text.0, separator, secondary_text).into()
     } else {
-        primary_text.0.clone() // Fallback to primary if secondary is missing/empty
+        primary_text.0.clone().into() // Fallback to primary if secondary is missing/empty
     }
 }
 

@@ -3,7 +3,6 @@ use super::{
     path_finder::PathFinder,
     util::{create_new_pak, secondary_text_combined, SEPARATOR_NEWLINE, SEPARATOR_SLASH},
 };
-use faststr::FastStr;
 use indexmap::IndexMap;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -33,7 +32,7 @@ pub struct XmlFile(pub String);
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct EntryId(pub String);
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct LastTextValue(pub FastStr);
+pub struct LastTextValue(pub String);
 
 // #[derive(Debug)]
 // ///HashMap<Entry id, Text in last cell>
@@ -154,7 +153,7 @@ impl BilingualGenerator {
                             inside_row = false;
                             if !current_cells.is_empty() && current_cells[0] != "Entry id" {
                                 if current_cells.len() >= 3 {
-                                    single_data.insert(EntryId(current_cells[0].clone()), LastTextValue(current_cells[2].clone().into()));
+                                    single_data.insert(EntryId(current_cells[0].clone()), LastTextValue(current_cells[2].clone()));
                                 }
                             }
                         }
@@ -236,7 +235,7 @@ impl BilingualGenerator {
                                                 secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
                                             }
                                             _ if primary_text.0.chars().count() <= 4 || menutext_too_long.contains(&&*entry_id.0) => {
-                                                primary_text.0.clone().into()
+                                                primary_text.0.clone()
                                             }
                                             _ if primary_text.0.chars().count() >= 20 => {
                                                 secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
@@ -245,14 +244,14 @@ impl BilingualGenerator {
                                             _ => secondary_text_combined(primary_text, secondary_text, SEPARATOR_SLASH),
                                         }
                                     } else {
-                                        primary_text.0.clone().into()
+                                        primary_text.0.clone()
                                     }
                                 }
                                 "text_ui_dialog.xml" => {
                                     if secondary_text != "MISSING" {
-                                        format!("{}{}{}", primary_text.0, SEPARATOR_NEWLINE, secondary_text).into()
+                                        format!("{}{}{}", primary_text.0, SEPARATOR_NEWLINE, secondary_text)
                                     } else {
-                                        format!("{}{}{}", primary_text.0, SEPARATOR_NEWLINE, english_text).into()
+                                        format!("{}{}{}", primary_text.0, SEPARATOR_NEWLINE, english_text)
                                     }
                                 }
                                 "text_ui_items.xml" => {
@@ -281,14 +280,14 @@ impl BilingualGenerator {
                                     {
                                         secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
                                     }
-                                    _ => primary_text.0.clone().into(),
+                                    _ => primary_text.0.clone(),
                                 },
                                 _ => {
                                     // Default case for other files
                                     if secondary_text != "MISSING" {
-                                        format!("{}{}{}", primary_text.0, SEPARATOR_SLASH, secondary_text).into()
+                                        format!("{}{}{}", primary_text.0, SEPARATOR_SLASH, secondary_text)
                                     } else {
-                                        format!("{}{}{}", primary_text.0, SEPARATOR_SLASH, english_text).into()
+                                        format!("{}{}{}", primary_text.0, SEPARATOR_SLASH, english_text)
                                     }
                                 }
                             };

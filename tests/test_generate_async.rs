@@ -3,8 +3,6 @@
 
 #[cfg(test)]
 mod tests {
-    // Adjust the path based on your project structure
-    // e.g., if bilingual_generator is in src/core/bilingual_generator.rs
     use kcd_bilingual_generator_rust::core::{
         bilingual_generator::{BilingualGenerator /*, EntryId, Language, XmlFile */},
         bilingual_generator_errors::BilingualGeneratorError,
@@ -12,9 +10,9 @@ mod tests {
     // use std::fs; // For potential cleanup
     // use std::path::PathBuf;
 
-    // Use the tokio::test attribute for async tests
     #[tokio::test]
-    async fn test_generate_bilingual_resources_async() -> Result<(), BilingualGeneratorError> {
+    //cargo test --release --package kcd_bilingual_generator_rust --test test_generate_async -- tests::test_generate_async --exact --show-output
+    async fn test_generate_async() -> Result<(), BilingualGeneratorError> {
         println!("--- Starting test_generate_bilingual_resources_async ---");
 
         // 1. Initialize the generator
@@ -39,7 +37,6 @@ mod tests {
         // 2. Call the asynchronous function
         // The `generate_bilingual_resources_async` function now handles
         // calling `acquire_bilingual_set` internally.
-        // Use `.await` to wait for the async operation to complete.
         println!("Calling generate_bilingual_resources_async()...");
         let result = generator.generate_bilingual_resources_async().await;
         println!("generate_bilingual_resources_async() completed.");
@@ -49,8 +46,6 @@ mod tests {
             Ok(messages) => {
                 println!("Async generation successful!");
                 println!("Generated messages: {:?}", messages.iter().collect::<Vec<_>>());
-                // Add more specific assertions if you know what to expect
-                // assert!(!messages.is_empty(), "Expected at least one message");
                 println!("--- Test Passed ---");
                 Ok(()) // Indicate test success
             }
@@ -76,7 +71,6 @@ mod tests {
         // if that's critical, even on panic or error.
     }
 }
-//cargo test --release --package kcd_bilingual_generator_rust --test generate_bilingual_resources_async_test -- tests --show-output
 
 /* ------------------------------------------------------------------------------------------------------------------------------- */
 // Processor:       Intel 12th Generation Core i5-12400F Six Core
@@ -171,6 +165,22 @@ mod tests {
 //     tests::test_generate_bilingual_resources_async
 
 // test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.25s
+
+// after applying faststr
+// --- Performance Summary (10 runs) ---
+// Individual run durations:
+//   Run 1: 10.775803s
+//   Run 2: 10.5967178s
+//   Run 3: 10.4683726s
+//   Run 4: 10.35491s
+//   Run 5: 10.5411002s
+//   Run 6: 10.4720224s
+//   Run 7: 10.5750342s
+//   Run 8: 11.0741312s
+//   Run 9: 10.747729s
+//   Run 10: 10.432761s
+// Total time for 10 runs: 106.0385814s
+// Average run time: 10.60385814s
 /* ----------------------------------------------------------test result (release mode, lto = thin)---------------------------------------------------------- */
 // test tests::test_generate_bilingual_resources_async ... ok
 
@@ -256,3 +266,20 @@ mod tests {
 //     tests::test_generate_bilingual_resources_async
 
 // test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.23s
+
+// after applying faststr
+// --- Performance Summary ---
+// Successful runs: 10 / 10
+// Individual successful run times (seconds reported by Cargo):
+//   2.140
+//   2.170
+//   2.160
+//   2.140
+//   2.190
+//   2.220
+//   2.190
+//   2.160
+//   2.140
+//   2.150
+// Total time reported by Cargo across successful runs: 21.660s
+// Average time reported by Cargo per successful run: 2.166s

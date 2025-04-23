@@ -28,6 +28,7 @@ serial_test = "2.0"
 egui_extras = { version = "0.31.1", features = ["all_loaders"] }
 tokio = { version = "1.44.2", features = ["full"] }
 thiserror = "2.0.12"
+faststr = "0.2.31"
 
 # [profile.dev]
 # lto = true

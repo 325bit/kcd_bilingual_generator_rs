@@ -1,17 +1,22 @@
-use crate::core::bilingual_generator::{BilingualGenerator, EntryId, Language, LastTextValue, XmlFile};
-use crate::core::bilingual_generator_errors::BilingualGeneratorError; // Assuming errors are in this module
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::Read, // Removed BufRead, BufReader unless needed elsewhere
+    path::PathBuf,
+    sync::Arc, // Use Arc for shared data
+};
+
+use crate::core::{
+    bilingual_generator::{BilingualGenerator, EntryId, Language, LastTextValue, XmlFile},
+    bilingual_generator_errors::BilingualGeneratorError,
+    util::{SEPARATOR_NEWLINE, SEPARATOR_SLASH},
+};
 
 use super::util::{create_new_pak, secondary_text_combined}; // Import the utility functions
 use indexmap::IndexMap;
 use quick_xml::{events::Event, Reader};
 use rayon::prelude::*; // Keep for parallel cleanup if desired
-use std::{
-    collections::{HashMap, HashSet},
-    fs::File,
-    io::{Read, Write}, // Removed BufRead, BufReader unless needed elsewhere
-    path::{Path, PathBuf},
-    sync::Arc, // Use Arc for shared data
-};
+
 use tokio::{
     sync::mpsc,               // Async channel
     task::{self, JoinHandle}, // Async tasks
@@ -91,7 +96,7 @@ impl BilingualGenerator {
                         inside_row = false;
                         // Original logic: Use cell 0 (ID) and cell 2 (Text)
                         if current_cells.len() >= 3 && current_cells[0] != "Entry id" {
-                            single_file_data.insert(EntryId(current_cells[0].clone()), LastTextValue(current_cells[2].clone()));
+                            single_file_data.insert(EntryId(current_cells[0].clone()), LastTextValue(current_cells[2].clone().into()));
                         }
                         // Clear cells after processing row, regardless of content
                         current_cells.clear();
@@ -165,11 +170,6 @@ impl BilingualGenerator {
         // let secondary_lang_id = Language(secondary_language.to_string());
         // let english_lang_id = Language("English".to_string()); // Assuming "English" is the fixed key
 
-        // Define separators (consider making these configurable or constants)
-        let separator_slash = "/";
-        // Use actual newline '\n' if the target system/game expects that.
-        // Use escaped "\\n" if the target system expects the literal characters '\' and 'n'.
-        let separator_newline = "\\n"; // Or "\n"
         let menutext_too_long = ["ui_state_health_desc", "ui_state_hunger_desc", "ui_DerivStat_MaxStamina_desc"];
 
         let mut generated_xml_paths = Vec::new(); // Collect paths *for this pair*
@@ -222,14 +222,14 @@ impl BilingualGenerator {
                                     secondary_text_combined(
                                         primary_text_val, // Pass LastTextValue here
                                         secondary_text,
-                                        separator_newline,
+                                        SEPARATOR_NEWLINE,
                                     )
                                 }
                                 _ if primary_text.chars().count() <= 4 || menutext_too_long.contains(&&*entry_id.0) => {
                                     primary_text.clone() // Just primary
                                 }
-                                _ if primary_text.chars().count() >= 20 => secondary_text_combined(primary_text_val, secondary_text, separator_newline),
-                                _ => secondary_text_combined(primary_text_val, secondary_text, separator_slash),
+                                _ if primary_text.chars().count() >= 20 => secondary_text_combined(primary_text_val, secondary_text, SEPARATOR_NEWLINE),
+                                _ => secondary_text_combined(primary_text_val, secondary_text, SEPARATOR_SLASH),
                             }
                         } else {
                             primary_text.clone() // Just primary for help overlay
@@ -237,10 +237,10 @@ impl BilingualGenerator {
                     }
                     "text_ui_dialog.xml" => {
                         if secondary_text != "MISSING" {
-                            format!("{}{}{}", primary_text, separator_newline, secondary_text)
+                            format!("{}{}{}", primary_text, SEPARATOR_NEWLINE, secondary_text).into()
                         } else {
                             // Fallback to English if secondary is missing
-                            format!("{}{}{}", primary_text, separator_newline, english_text)
+                            format!("{}{}{}", primary_text, SEPARATOR_NEWLINE, english_text).into()
                         }
                     }
                     "text_ui_items.xml" => {
@@ -251,45 +251,50 @@ impl BilingualGenerator {
                             {
                                 primary_text.clone() // Just primary
                             }
-                            _ if primary_text.chars().count() >= 7 => secondary_text_combined(primary_text_val, secondary_text, separator_newline),
-                            _ => secondary_text_combined(primary_text_val, secondary_text, separator_slash),
+                            _ if primary_text.chars().count() >= 7 => secondary_text_combined(primary_text_val, secondary_text, SEPARATOR_NEWLINE),
+                            _ => secondary_text_combined(primary_text_val, secondary_text, SEPARATOR_SLASH),
                         }
                     }
                     "text_ui_soul.xml" => match true {
                         _ if (primary_text.chars().count() <= 7 && primary_text != "MISSING")
                             || (primary_text.chars().count() <= 12 && entry_id.0.contains("stat_")) =>
                         {
-                            secondary_text_combined(primary_text_val, secondary_text, separator_slash)
+                            secondary_text_combined(primary_text_val, secondary_text, SEPARATOR_SLASH)
                         }
                         _ if (entry_id.0.contains("buff") && entry_id.0.contains("desc") && !entry_id.0.contains("drunkenness_desc"))
                             || (entry_id.0.contains("perk") && entry_id.0.contains("_desc")) =>
                         {
-                            secondary_text_combined(primary_text_val, secondary_text, separator_newline)
+                            secondary_text_combined(primary_text_val, secondary_text, SEPARATOR_NEWLINE)
                         }
                         _ => primary_text.clone(), // Just primary
                     },
                     _ => {
                         // Default case for other files (e.g., text_ui_quest, text_ui_tutorials)
                         if secondary_text != "MISSING" {
-                            format!("{}{}{}", primary_text, separator_slash, secondary_text)
+                            format!("{}{}{}", primary_text, SEPARATOR_SLASH, secondary_text).into()
                         } else {
                             // Fallback to English
-                            format!("{}{}{}", primary_text, separator_slash, english_text)
+                            format!("{}{}{}", primary_text, SEPARATOR_SLASH, english_text).into()
                         }
                     }
                 };
                 // --- End Combine text logic ---
 
-                // Escape cell content to prevent invalid XML
-                // Note: `quick_xml::escape::escape` returns Cow<str>, use `.as_ref()` if needed elsewhere
-                let escaped_entry_id = quick_xml::escape::escape(&entry_id.0);
-                let escaped_primary_text = quick_xml::escape::escape(primary_text); // Use the &str
-                let escaped_combined_text = quick_xml::escape::escape(&combined_text);
-
                 rows.push(format!(
                     "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{}</Cell></Row>",
-                    escaped_entry_id, escaped_primary_text, escaped_combined_text
+                    entry_id.0, primary_text, combined_text
                 ));
+
+                // Escape cell content to prevent invalid XML
+                // Note: `quick_xml::escape::escape` returns Cow<str>, use `.as_ref()` if needed elsewhere
+                // let escaped_entry_id = quick_xml::escape::escape(&entry_id.0);
+                // let escaped_primary_text = quick_xml::escape::escape(primary_text); // Use the &str
+                // let escaped_combined_text = quick_xml::escape::escape(&combined_text);
+
+                // rows.push(format!(
+                //     "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{}</Cell></Row>",
+                //     escaped_entry_id, escaped_primary_text, escaped_combined_text
+                // ));
             }
 
             // Write the generated XML content to a file
