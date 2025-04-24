@@ -72,7 +72,7 @@ impl BilingualGenerator {
         let kcd_path = path_finder.find_game_path().map_or_else(|_| PathBuf::new(), |p| p.to_path_buf());
 
         // --- Database Initialization ---
-        dotenv::dotenv().ok();
+        dotenv::dotenv().expect("Failed to load .env file for testing");
         let database_url = std::env::var("DATABASE_URL")
             .map_err(|_| BilingualGeneratorError::DatabaseInitializationFailed("DATABASE_URL environment variable not set.".to_string()))?;
 

@@ -13,9 +13,6 @@ mod tests {
 
         // Ensure DATABASE_URL is set in your environment for testing!
         // Example: export DATABASE_URL="postgresql://user:pass@host/db"
-        if std::env::var("DATABASE_URL").is_err() {
-            panic!("DATABASE_URL environment variable not set. Set it to your test PostgreSQL instance.");
-        }
 
         // Use the path from PathFinder to locate the actual game path
         let mut path_finder = PathFinder::new();
