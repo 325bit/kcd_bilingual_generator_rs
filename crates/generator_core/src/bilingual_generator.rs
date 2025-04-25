@@ -26,11 +26,11 @@ pub struct BilingualGenerator {
     pub all_data: HashMap<XmlFile, HashMap<Language, IndexMap<EntryId, LastTextValue>>>,
 }
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct Language(pub String);
+pub struct Language(pub FastStr);
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct XmlFile(pub String);
+pub struct XmlFile(pub FastStr);
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct EntryId(pub String);
+pub struct EntryId(pub FastStr);
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct LastTextValue(pub FastStr);
 
@@ -76,13 +76,13 @@ impl BilingualGenerator {
             all_data: HashMap::new(),
         })
     }
-    pub fn acquire_bilingual_set(&mut self) -> Result<Vec<(String, String)>, BilingualGeneratorError> {
+    pub fn acquire_bilingual_set(&mut self) -> Result<Vec<(FastStr, FastStr)>, BilingualGeneratorError> {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::new());
         let bilingual_set_dir = working_dir.join("..\\..\\assets\\bilingual_set.txt");
         let bilingual_set_file = File::open(&bilingual_set_dir)
             .map_err(|_| BilingualGeneratorError::InvalidBilingualSet(format!("No bilingual_set.txt in {:?}", bilingual_set_dir)))?;
         let reader = BufReader::new(bilingual_set_file);
-        let mut bilingual_set: Vec<(String, String)> = vec![];
+        let mut bilingual_set: Vec<(FastStr, FastStr)> = vec![];
         // start reading
         for (_, line_result) in reader.lines().enumerate() {
             let line: String = line_result.map_err(|_| BilingualGeneratorError::InvalidBilingualSet("Fail to get String.".to_string()))?;
@@ -110,7 +110,7 @@ impl BilingualGenerator {
             if !self.language_to_process.contains(&secondary_language) {
                 self.language_to_process.push(secondary_language.clone());
             }
-            bilingual_set.push((primary_language, secondary_language));
+            bilingual_set.push((primary_language.into(), secondary_language.into()));
         }
         Ok(bilingual_set)
     }
@@ -153,7 +153,7 @@ impl BilingualGenerator {
                             inside_row = false;
                             if !current_cells.is_empty() && current_cells[0] != "Entry id" {
                                 if current_cells.len() >= 3 {
-                                    single_data.insert(EntryId(current_cells[0].clone()), LastTextValue(current_cells[2].clone().into()));
+                                    single_data.insert(EntryId(current_cells[0].clone().into()), LastTextValue(current_cells[2].clone().into()));
                                 }
                             }
                         }
@@ -175,9 +175,9 @@ impl BilingualGenerator {
                 // Thread-safe insertion into all_data
                 let mut guard = all_data.lock().unwrap();
                 guard
-                    .entry(XmlFile(xml_filename.clone()))
+                    .entry(XmlFile(xml_filename.clone().into()))
                     .or_insert_with(HashMap::new)
-                    .insert(Language(language.clone()), single_data);
+                    .insert(Language(language.clone().into()), single_data);
                 Ok(())
             })
         })
@@ -193,8 +193,8 @@ impl BilingualGenerator {
         std::fs::create_dir_all(&xml_output_dir).map_err(|e| BilingualGeneratorError::XmlProcessingFailed(format!("Error processing XML: {}", e)))?;
 
         // Prepare language identifiers
-        let primary_lang = Language(primary_language.to_string());
-        let secondary_lang = Language(secondary_language.to_string());
+        let primary_lang = Language(primary_language.to_string().into());
+        let secondary_lang = Language(secondary_language.to_string().into());
 
         // Define separators
         // let SEPARATOR_SLASH = "/";
@@ -202,7 +202,7 @@ impl BilingualGenerator {
         let menutext_too_long = ["ui_state_health_desc", "ui_state_hunger_desc", "ui_DerivStat_MaxStamina_desc"];
         // Process each XML file in parallel
         self.files_to_process.par_iter().for_each(|file_name| {
-            let xml_file = XmlFile(file_name.clone());
+            let xml_file = XmlFile(file_name.clone().into());
             let file_data = self.all_data.get(&xml_file).ok_or(BilingualGeneratorError::XmlProcessingFailed(format!(
                 "Could not find the required XML file: {}",
                 file_name
@@ -217,7 +217,7 @@ impl BilingualGenerator {
                 let empty_map: IndexMap<EntryId, LastTextValue> = IndexMap::new();
                 let secondary_entries = file_data.get(&secondary_lang).unwrap_or(&empty_map);
                 let empty_map_cloned = empty_map.clone();
-                let english_entries = file_data.get(&Language("English".to_string())).unwrap_or(&empty_map_cloned);
+                let english_entries = file_data.get(&Language("English".into())).unwrap_or(&empty_map_cloned);
 
                 // Build XML content
                 let mut rows = Vec::new();

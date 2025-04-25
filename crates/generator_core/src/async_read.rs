@@ -11,6 +11,7 @@ use super::{
     bilingual_generator_errors::BilingualGeneratorError,
     util::{SEPARATOR_NEWLINE, SEPARATOR_SLASH, create_new_pak, secondary_text_combined},
 };
+use faststr::FastStr;
 // Import the utility functions
 use indexmap::IndexMap;
 use quick_xml::{Reader, events::Event};
@@ -31,7 +32,7 @@ impl BilingualGenerator {
     // --- Synchronous Helper: Reads XMLs for ONE language ---
     // Intended to be run inside tokio::task::spawn_blocking
     fn read_single_language_xmls_sync(
-        language: String,
+        language: FastStr,
         game_path: PathBuf,                 // Pass necessary data
         files_to_process: Arc<Vec<String>>, // Use Arc for shared Vec
     ) -> Result<HashMap<XmlFile, IndexMap<EntryId, LastTextValue>>, BilingualGeneratorError> {
@@ -81,7 +82,7 @@ impl BilingualGenerator {
             let mut reader = Reader::from_str(&content);
             let mut buf = Vec::with_capacity(1024); // Increased capacity slightly
             let mut single_file_data = IndexMap::new();
-            let mut current_cells: Vec<String> = Vec::with_capacity(4);
+            let mut current_cells: Vec<FastStr> = Vec::with_capacity(4);
             let mut inside_row = false;
 
             loop {
@@ -104,7 +105,7 @@ impl BilingualGenerator {
                         if inside_row {
                             // Using unescape() to handle XML entities like &, <, etc.
                             match e.unescape() {
-                                Ok(text) => current_cells.push(text.into_owned()),
+                                Ok(text) => current_cells.push(text.into_owned().into()),
                                 Err(xml_err) => {
                                     // Handle potential UTF-8 errors during unescaping too
                                     eprintln!("[Reader: {}] XML unescape error in {}: {}", language, xml_filename, xml_err);
@@ -133,7 +134,7 @@ impl BilingualGenerator {
                     _ => {} // Ignore other events like comments, processing instructions, etc.
                 }
             }
-            language_data.insert(XmlFile(xml_filename.clone()), single_file_data);
+            language_data.insert(XmlFile(xml_filename.clone().into()), single_file_data);
             // println!("[Reader: {}] Finished processing file: {}", language, xml_filename); // Debug
         }
 
@@ -147,7 +148,6 @@ impl BilingualGenerator {
         // Pass necessary parts of self or cloned data
         working_dir: PathBuf,
         files_to_process: Arc<Vec<String>>,
-        // ---
         primary_language: &str,
         secondary_language: &str,
         primary_data: SharedLanguageData,   // Receive Arc'd data
@@ -177,7 +177,7 @@ impl BilingualGenerator {
         // Using Rayon's par_iter here is possible but adds complexity if the per-file
         // processing is already fast enough. Sticking to sequential for simplicity first.
         for file_name in files_to_process.iter() {
-            let xml_file_id = XmlFile(file_name.clone());
+            let xml_file_id = XmlFile(file_name.clone().into());
 
             // Get data for *this specific file* from the pre-read language data maps
             let primary_entries = primary_data.get(&xml_file_id);
@@ -371,10 +371,10 @@ impl BilingualGenerator {
 
         // 2. Identify all unique languages needed (including English fallback)
         // Use the potentially updated self.language_to_process
-        let mut required_languages: HashSet<String> = HashSet::new();
-        required_languages.insert("English".to_string()); // Always needed
+        let mut required_languages: HashSet<FastStr> = HashSet::new();
+        required_languages.insert("English".to_string().into()); // Always needed
         for lang in &self.language_to_process {
-            required_languages.insert(lang.clone());
+            required_languages.insert(lang.clone().into());
         }
         // Also ensure languages from the set are included (acquire_bilingual_set should handle this)
         for (p, s) in &bilingual_set {
@@ -470,7 +470,7 @@ impl BilingualGenerator {
                 let (p_str, s_str) = pair;
                 let p_lang = Language(p_str.clone());
                 let s_lang = Language(s_str.clone());
-                let eng_lang = Language("English".to_string());
+                let eng_lang = Language("English".into());
 
                 // Check if data for Primary, Secondary, AND English is available (i.e., successfully read)
                 let p_data_arc = read_data.get(&p_lang);

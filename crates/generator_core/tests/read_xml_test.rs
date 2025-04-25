@@ -13,9 +13,9 @@ mod tests {
         // Call the read_xml_from_paks function to parse XML files
         match generator.read_xml_from_paks() {
             Ok(_) => {
-                let extracted_data = generator.all_data.get(&XmlFile("text_ui_soul.xml".to_string())).unwrap();
-                let xml_data = extracted_data.get(&Language("Chineses".to_string())).unwrap();
-                let entry_id = EntryId("buff_alcoholism_level3_desc".to_string());
+                let extracted_data = generator.all_data.get(&XmlFile("text_ui_soul.xml".into())).unwrap();
+                let xml_data = extracted_data.get(&Language("Chineses".into())).unwrap();
+                let entry_id = EntryId("buff_alcoholism_level3_desc".into());
                 let content = xml_data.get(&entry_id).unwrap();
                 println!("content it get = {}", content.0);
                 // let text = "酗酒";
