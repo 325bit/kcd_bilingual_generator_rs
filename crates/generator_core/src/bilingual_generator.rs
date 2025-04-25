@@ -8,6 +8,8 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 use rayon::prelude::*;
 // use sqlx::Row; // Import Row trait
+use log::{error, info, warn};
+use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 use sqlx::postgres::PgPoolOptions;
 use std::{
     collections::HashMap, // Keep HashMap for processing results
@@ -54,8 +56,15 @@ impl BilingualGenerator {
         let runtime = Runtime::new()?; // Handle error properly
 
         let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::new());
+
+        // Initialize the logger
+        let log_file = working_dir.join("bilingual_generator.log");
+        let log_file_handle =
+            File::create(&log_file).map_err(|e| BilingualGeneratorError::DatabaseInitializationFailed(format!("Failed to create log file: {}", e)))?;
+        CombinedLogger::init(vec![WriteLogger::new(LevelFilter::Info, Config::default(), log_file_handle)])
+            .map_err(|e| BilingualGeneratorError::DatabaseInitializationFailed(format!("Failed to initialize logger: {}", e)))?;
+
         let files_to_process = vec![
-            // ... (same as before)
             String::from("text_ui_dialog.xml"),    // Dialogues
             String::from("text_ui_quest.xml"),     // Quests
             String::from("text_ui_tutorials.xml"), // Tutorials
@@ -63,11 +72,7 @@ impl BilingualGenerator {
             String::from("text_ui_items.xml"),     // Items
             String::from("text_ui_menus.xml"),     // Menus
         ];
-        let default_language_to_process = vec![
-            // ... (same as before)
-            String::from("Chineses"),
-            String::from("English"),
-        ];
+        let default_language_to_process = vec![String::from("Chineses"), String::from("English")];
         let mut path_finder = PathFinder::new();
         let kcd_path = path_finder.find_game_path().map_or_else(|_| PathBuf::new(), |p| p.to_path_buf());
 
@@ -123,7 +128,6 @@ impl BilingualGenerator {
         // --- End of Schema Setup ---
 
         Ok(Self {
-            // ... rest of the fields ...
             game_path: kcd_path,
             working_dir,
             files_to_process,
@@ -180,29 +184,28 @@ impl BilingualGenerator {
             let pak_filename = format!("{}_xml.pak", language_str);
             let pak_path = self.game_path.join("Localization").join(&pak_filename);
 
-            println!("[DB Load] Processing language: {}", language_str); // Add logging
+            info!("[DB Load] Processing language: {}", language_str); // Replaced println!
 
             let pak_file = match File::open(&pak_path) {
                 Ok(file) => file,
                 Err(e) => {
-                    eprintln!("[DB Load] Warning: Could not open PAK file for language '{}': {}. Skipping.", language_str, e);
+                    warn!("[DB Load] Warning: Could not open PAK file for language '{}': {}. Skipping.", language_str, e); // Replaced eprintln!
                     return Ok(()); // Skip this language if pak doesn't exist
                 }
             };
 
             let mut archive = ZipArchive::new(pak_file).map_err(|e| {
-                eprintln!("[DB Load] Error opening zip archive for {}: {}", pak_filename, e);
+                error!("[DB Load] Error opening zip archive for {}: {}", pak_filename, e); // Replaced eprintln!
                 BilingualGeneratorError::PakExtractionFailed
             })?;
 
-            // Process XML files sequentially for this language
             for xml_filename_str in &self.files_to_process {
-                println!("[DB Load]   File: {}", xml_filename_str); // Add logging
+                info!("[DB Load]   File: {}", xml_filename_str);
 
                 let mut xml_file = match archive.by_name(xml_filename_str) {
                     Ok(file) => file,
                     Err(e) => {
-                        eprintln!(
+                        warn!(
                             "[DB Load] Warning: Could not find '{}' in '{}': {}. Skipping.",
                             xml_filename_str, pak_filename, e
                         );
@@ -212,7 +215,7 @@ impl BilingualGenerator {
 
                 let mut content = String::new();
                 xml_file.read_to_string(&mut content).map_err(|e| {
-                    eprintln!("[DB Load] Error reading XML content from {}: {}", xml_filename_str, e);
+                    error!("[DB Load] Error reading XML content from {}: {}", xml_filename_str, e); // Replaced eprintln!
                     BilingualGeneratorError::PakExtractionFailed
                 })?;
 
@@ -241,13 +244,13 @@ impl BilingualGenerator {
                                     single_data.insert(EntryId(current_cells[0].clone()), LastTextValue(FastStr::from("")));
                                 } else {
                                     // Handle unexpected row structure if needed
-                                    eprintln!(
+                                    warn!(
                                         "[DB Load] Warning: Row skipped due to unexpected cell count ({}) in {}/{}: ID={}",
                                         current_cells.len(),
                                         language_str,
                                         xml_filename_str,
                                         current_cells.get(0).cloned().unwrap_or_default()
-                                    );
+                                    ); // Replaced eprintln!
                                 }
                             }
                         }
@@ -272,28 +275,23 @@ impl BilingualGenerator {
                     buf.clear();
                 }
 
-                // --- Database Insertion ---
-                // Clone pool for use within block_on
                 let pool = self.db_pool.clone();
                 let lang_clone = language_str.clone();
                 let file_clone = xml_filename_str.clone();
 
                 self.runtime.block_on(async {
-                    let mut tx = pool.begin().await?; // Start transaction
-
-                    // Clear existing data for this specific language and file
-                    sqlx::query("DELETE FROM text_entries WHERE language = $1 AND xml_file = $2")
-                        .bind(&lang_clone)
-                        .bind(&file_clone)
-                        .execute(&mut *tx) // Use mut *tx
-                        .await?;
-
-                    println!("[DB Load]     Inserting {} entries for {}/{}", single_data.len(), lang_clone, file_clone);
-
+                    let mut tx = pool.begin().await?;
                     // Prepare insert statement (consider doing this outside the loop if possible, but fine here)
                     // Note: ON CONFLICT is an alternative to DELETE+INSERT, but requires more setup for batching
-                    let insert_query = "INSERT INTO text_entries (xml_file, language, entry_id, text_value, entry_order) VALUES ($1, $2, $3, $4, $5)";
-
+                    let insert_query = "
+                        INSERT INTO text_entries 
+                            (xml_file, language, entry_id, text_value, entry_order) 
+                        VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT (xml_file, language, entry_id)
+                        DO UPDATE SET 
+                            text_value = EXCLUDED.text_value,
+                            entry_order = EXCLUDED.entry_order
+                    ";
                     // Insert data in batches (conceptually, within one transaction)
                     for (index, (entry_id, text_value)) in single_data.iter().enumerate() {
                         sqlx::query(insert_query)

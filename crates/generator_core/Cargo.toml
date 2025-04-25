@@ -19,6 +19,8 @@ sqlx = { version = "0.8.5", features = [
     "macros",
 ] }
 diesel = { version = "1.4", features = ["postgres"] }
+log = "0.4"
+simplelog = "0.12"
 
 [dev-dependencies]
 diesel = { version = "1.4", features = ["postgres"] }
