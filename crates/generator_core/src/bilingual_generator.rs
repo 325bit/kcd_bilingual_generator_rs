@@ -78,7 +78,9 @@ impl BilingualGenerator {
     }
     pub fn acquire_bilingual_set(&mut self) -> Result<Vec<(FastStr, FastStr)>, BilingualGeneratorError> {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::new());
-        let bilingual_set_dir = working_dir.join("..\\..\\assets\\bilingual_set.txt");
+        // println!("Working directory: {:?}", working_dir);
+        let bilingual_set_dir = working_dir.join(r"assets\bilingual_set.txt");
+        // println!("Bilingual set directory: {:?}", bilingual_set_dir);
         let bilingual_set_file = File::open(&bilingual_set_dir)
             .map_err(|_| BilingualGeneratorError::InvalidBilingualSet(format!("No bilingual_set.txt in {:?}", bilingual_set_dir)))?;
         let reader = BufReader::new(bilingual_set_file);
@@ -234,7 +236,7 @@ impl BilingualGenerator {
                                             _ if entry_id.0.contains("ui_loading") || entry_id.0.contains("codex_cont") => {
                                                 secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
                                             }
-                                            _ if primary_text.0.chars().count() <= 4 || menutext_too_long.contains(&&*entry_id.0) => {
+                                            _ if primary_text.0.chars().count() <= 6 || menutext_too_long.contains(&&*entry_id.0) => {
                                                 primary_text.0.clone().into()
                                             }
                                             _ if primary_text.0.chars().count() >= 20 => {
