@@ -126,18 +126,31 @@ impl BilingualGenerator {
         self.language_to_process.par_iter().try_for_each(|language| {
             let pak_filename = format!("{}_xml.pak", language);
             let pak_path = self.game_path.join("Localization").join(&pak_filename);
-            let pak_file = File::open(&pak_path).map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
+            let pak_file = File::open(&pak_path).map_err(|e| BilingualGeneratorError::PakOperationFailed {
+                operation: "opening PAK file".to_string(),
+                context: pak_path.display().to_string(),
+                source: e,
+            })?;
 
-            let mut archive = ZipArchive::new(pak_file).map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
+            let mut archive = ZipArchive::new(pak_file).map_err(|e| BilingualGeneratorError::PakOperationFailed {
+                operation: "creating ZipArchive from PAK".to_string(),
+                context: pak_path.display().to_string(),
+                source: e.into(),
+            })?;
 
             self.files_to_process.iter().try_for_each(|xml_filename| {
-                let mut xml_file = archive.by_name(xml_filename).map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
+                let mut xml_file = archive.by_name(xml_filename).map_err(|e| BilingualGeneratorError::PakOperationFailed {
+                    operation: "finding XML file in PAK".to_string(),
+                    context: format!("{} in {}", xml_filename, pak_filename),
+                    source: e.into(),
+                })?;
 
                 let mut content = String::new();
-                xml_file
-                    .read_to_string(&mut content)
-                    .map_err(|_| BilingualGeneratorError::PakExtractionFailed)?;
-
+                xml_file.read_to_string(&mut content).map_err(|e| BilingualGeneratorError::PakOperationFailed {
+                    operation: "reading XML content from PAK".to_string(),
+                    context: format!("{} in {}", xml_filename, pak_filename),
+                    source: e,
+                })?;
                 let mut reader = Reader::from_str(&content);
                 // reader.trim_text(true); // Reduces unnecessary allocations
                 let mut buf = Vec::with_capacity(512); // Pre-allocate buffer

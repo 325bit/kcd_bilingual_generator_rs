@@ -106,6 +106,7 @@ impl eframe::App for GuiBilingualPakGenerator {
                         if ui.button("Generate Bilingual Pak").clicked() {
                             self.messages.push_str("Starting generation process...\n");
                             let start_time = Instant::now();
+
                             match self.generate_bilingual_resources() {
                                 Ok(generator_result_set) => {
                                     let duration = start_time.elapsed();
@@ -148,6 +149,7 @@ impl eframe::App for GuiBilingualPakGenerator {
 impl GuiBilingualPakGenerator {
     fn generate_bilingual_resources(&mut self) -> Result<Vec<String>, BilingualGeneratorError> {
         let mut generator = BilingualGenerator::init()?;
+        generator.game_path = self.game_location.clone();
         let bilingual_set = generator.acquire_bilingual_set()?;
         generator.read_xml_from_paks()?;
 
