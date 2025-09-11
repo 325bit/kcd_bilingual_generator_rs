@@ -18,7 +18,7 @@ mod tests {
                 let xml_data = extracted_data.get(&Language("English".into())).unwrap();
                 let entry_id = EntryId("zlod_henry_zavri_klapacku_2dQP".into());
                 let content = xml_data.get(&entry_id).expect(&format!("在 xml_data 中未找到 ID 为 '{:?}' 的条目。", entry_id));
-                println!("content it get = {}", content.0);
+                println!("content it get = {:?}", content);
 
                 // let entry_id_missing = EntryId("ui_hrac_si_p_seq35_49Z0".into());
                 // let dialogset_missing = generator.eng_backup_textvalue.get(&dialogxml).unwrap();

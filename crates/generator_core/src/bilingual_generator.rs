@@ -23,7 +23,7 @@ pub struct BilingualGenerator {
     pub working_dir: PathBuf,
     pub files_to_process: Vec<String>,
     pub language_to_process: Vec<String>,
-    pub all_data: HashMap<XmlFile, HashMap<Language, IndexMap<EntryId, LastTextValue>>>,
+    pub all_data: HashMap<XmlFile, HashMap<Language, IndexMap<EntryId, TextEntry>>>,
 }
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Language(pub FastStr);
@@ -31,9 +31,13 @@ pub struct Language(pub FastStr);
 pub struct XmlFile(pub FastStr);
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct EntryId(pub FastStr);
+// #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+// pub struct LastTextValue(pub FastStr);
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct LastTextValue(pub FastStr);
-
+pub struct TextEntry {
+    pub source_text: FastStr,     // 对应第二个 <Cell>
+    pub translated_text: FastStr, // 对应第三个 <Cell>
+}
 // #[derive(Debug)]
 // ///HashMap<Entry id, Text in last cell>
 // pub struct single_xml_data {
@@ -172,7 +176,13 @@ impl BilingualGenerator {
                             if !current_cells.is_empty() && current_cells[0] != "Entry id" {
                                 // Ensure we have at least 3 cells for EntryId and LastTextValue
                                 if current_cells.len() >= 3 {
-                                    single_data.insert(EntryId(current_cells[0].clone().into()), LastTextValue(current_cells[2].clone().into()));
+                                    let entry = TextEntry {
+                                        // If the second cell is empty, store an empty string too
+                                        source_text: current_cells.get(1).cloned().unwrap_or_default().into(),
+                                        // the third cell
+                                        translated_text: current_cells.get(2).cloned().unwrap_or_default().into(),
+                                    };
+                                    single_data.insert(EntryId(current_cells[0].clone().into()), entry);
                                 }
                             }
                         }
@@ -220,164 +230,222 @@ impl BilingualGenerator {
     }
 
     pub fn process_single_bilingual(&self, primary_language: &str, secondary_language: &str) -> Result<PathBuf, BilingualGeneratorError> {
-        // Create output directory
+        // Create output directory for the bilingual XML files
         let xml_output_dir = self
             .working_dir
             .join(format!("bilingual_xml\\{} + {}\\Localization", primary_language, secondary_language));
-        let xml_output_set: Mutex<Vec<PathBuf>> = Mutex::new(vec![]); // Use Mutex for thread safety
 
-        std::fs::create_dir_all(&xml_output_dir).map_err(|e| BilingualGeneratorError::XmlProcessingFailed(format!("Error processing XML: {}", e)))?;
+        // A thread-safe vector to collect paths of generated XML files for later PAK creation and cleanup.
+        let xml_output_set: Mutex<Vec<PathBuf>> = Mutex::new(vec![]);
 
-        // Prepare language identifiers
+        // Ensure the output directory exists.
+        std::fs::create_dir_all(&xml_output_dir)
+            .map_err(|e| BilingualGeneratorError::XmlProcessingFailed(format!("Error creating output directory: {}", e)))?;
+
+        // Prepare language identifiers for efficient lookups.
         let primary_lang = Language(primary_language.to_string().into());
         let secondary_lang = Language(secondary_language.to_string().into());
+        let english_lang = Language("English".into());
 
-        // let menutext_too_long = ["ui_state_health_desc", "ui_state_hunger_desc", "ui_DerivStat_MaxStamina_desc"];
-        // Process each XML file in parallel
+        // Process each XML file in parallel using Rayon.
         self.files_to_process.par_iter().for_each(|file_name| {
             let xml_file = XmlFile(file_name.clone().into());
-            let file_data = self.all_data.get(&xml_file).ok_or(BilingualGeneratorError::XmlProcessingFailed(format!(
-                "Could not find the required XML file: {}",
-                file_name
-            )));
+
+            // Get all data for the current XML file. Handle missing file gracefully.
+            let file_data = self
+                .all_data
+                .get(&xml_file)
+                .ok_or_else(|| BilingualGeneratorError::XmlProcessingFailed(format!("Could not find the required XML file in `all_data`: {}", file_name)));
 
             if let Ok(file_data) = file_data {
-                // Get entries for both languages
-                let primary_entries = file_data.get(&primary_lang).ok_or(BilingualGeneratorError::XmlProcessingFailed(format!(
-                    "Could not Get primary_entries for primary_language [{:?}].",
-                    &primary_lang
-                )));
-                let empty_map: IndexMap<EntryId, LastTextValue> = IndexMap::new();
-                let secondary_entries = file_data.get(&secondary_lang).unwrap_or(&empty_map);
-                let empty_map_cloned = empty_map.clone();
-                let english_entries = file_data.get(&Language("English".into())).unwrap_or(&empty_map_cloned);
+                // Get entries for the primary language.
+                let primary_entries = file_data.get(&primary_lang).ok_or_else(|| {
+                    BilingualGeneratorError::XmlProcessingFailed(format!("Could not get primary_entries for primary_language [{:?}].", &primary_lang))
+                });
 
-                // Build XML content
-                let mut rows = Vec::new();
+                // Create empty IndexMaps as fallbacks if a language's data is not found.
+                let empty_map: IndexMap<EntryId, TextEntry> = IndexMap::new();
+                let secondary_entries = file_data.get(&secondary_lang).unwrap_or(&empty_map);
+                let english_entries = file_data.get(&english_lang).unwrap_or(&empty_map);
+
+                let mut rows = Vec::new(); // Collect all <Row> elements for this XML file.
+
                 match primary_entries {
                     Ok(entries) => {
-                        for (entry_id, primary_text) in entries {
-                            let secondary_text = secondary_entries.get(entry_id).map(|lv| lv.0.as_str()).unwrap_or("MISSING");
-                            let english_text = english_entries.get(entry_id).map(|lv| lv.0.as_str()).unwrap_or("MISSING");
+                        for (entry_id, primary_entry) in entries {
+                            // Extract the primary language's translated text (from the 3rd cell of the primary language's XML).
+                            let primary_text_str = primary_entry.translated_text.as_str();
 
+                            // Get the secondary language's translated text. Default to "MISSING" if not found.
+                            let mut secondary_text_str = secondary_entries.get(entry_id).map(|e| e.translated_text.as_str()).unwrap_or("MISSING");
+
+                            // Get the English translated text. Default to "MISSING" if not found.
+                            let english_text_str = english_entries.get(entry_id).map(|e| e.translated_text.as_str()).unwrap_or("MISSING");
+
+                            // --- START OF NEW LOGIC: Reverse-lookup for missing secondary/English text in text_ui_dialog.xml ---
+                            // This block addresses the specific scenario where an entry in the primary language
+                            // (e.g., Chinese) exists, but its corresponding secondary language (e.g., English, as source text)
+                            // and fallback English are both "MISSING".
+                            if file_name == "text_ui_dialog.xml"
+                                && secondary_text_str == "MISSING"
+                                && english_text_str == "MISSING"
+                                && !primary_text_str.is_empty()
+                            // Ensure primary text is not empty before attempting lookup
+                            {
+                                // Iterate over all primary language entries (again) to find a potential match.
+                                for (_other_id, other_entry) in entries.iter() {
+                                    // If another entry has the same translated text as the current primary text
+                                    // AND its `source_text` (from the 2nd cell, typically the original English) is not empty,
+                                    // then we've found a suitable replacement.
+                                    if other_entry.translated_text == primary_entry.translated_text && !other_entry.source_text.is_empty() {
+                                        // Use this non-empty source text to fill the `secondary_text_str` gap.
+                                        secondary_text_str = other_entry.source_text.as_str();
+                                        break; // Found a suitable replacement, exit this inner search loop.
+                                    }
+                                }
+                            }
+                            // --- END OF NEW LOGIC ---
+
+                            // Determine the combined text based on file name and specific rules.
                             let combined_text = match file_name.as_str() {
                                 "text_ui_menus.xml" => {
                                     if !entry_id.0.contains("ui_helpoverlay") {
                                         match true {
+                                            // Specific handling for loading screens or codex content.
                                             _ if entry_id.0.contains("ui_loading") || entry_id.0.contains("codex_cont") => {
-                                                secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
+                                                secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_NEWLINE)
                                             }
-                                            _ if primary_text.0.chars().count() <= 6
-                                                || primary_text.0.chars().count() + secondary_text.chars().count() > 1040 =>
+                                            // Handle very short primary texts or combined texts exceeding character limits.
+                                            _ if primary_text_str.chars().count() <= 6
+                                                || (primary_text_str.chars().count() + secondary_text_str.chars().count() > 1040) =>
                                             {
-                                                primary_text.0.clone().into()
+                                                primary_text_str.to_string().into() // Only primary text
                                             }
-                                            _ if primary_text.0.chars().count() >= 20 => {
-                                                secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
+                                            // If primary text is long, use a newline separator.
+                                            _ if primary_text_str.chars().count() >= 20 => {
+                                                secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_NEWLINE)
                                             }
-
-                                            _ => secondary_text_combined(primary_text, secondary_text, SEPARATOR_SLASH),
+                                            // Default for menus: use a slash separator.
+                                            _ => secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_SLASH),
                                         }
                                     } else {
-                                        primary_text.0.clone().into()
+                                        primary_text_str.to_string().into() // For helpoverlay entries, only use primary text.
                                     }
                                 }
                                 "text_ui_dialog.xml" => {
-                                    if secondary_text != "MISSING" {
-                                        format!("{}{}{}", primary_text.0, SEPARATOR_NEWLINE, secondary_text).into()
+                                    // Use the (potentially corrected by reverse-lookup) secondary text.
+                                    // If still "MISSING", fall back to the English text.
+                                    let fallback_text = if secondary_text_str != "MISSING" {
+                                        secondary_text_str
                                     } else {
-                                        format!("{}{}{}", primary_text.0, SEPARATOR_NEWLINE, english_text).into()
-                                    }
+                                        english_text_str
+                                    };
+                                    format!("{}{}{}", primary_text_str, SEPARATOR_NEWLINE, fallback_text).into()
                                 }
                                 "text_ui_items.xml" => {
                                     match true {
-                                        _ if (entry_id.0.contains("step") && !entry_id.0.contains("_step_1") && primary_text.0.chars().count() >= 10)
+                                        // Specific conditions for item step descriptions or certain combat modifiers.
+                                        _ if (entry_id.0.contains("step")
+                                            && !entry_id.0.contains("_step_1")
+                                            && primary_text_str.chars().count() >= 10)
                                             || (entry_id.0.contains("step_1")
                                                 && (entry_id.0.contains("scatter") || entry_id.0.contains("longWeak") || entry_id.0.contains("bane"))) =>
                                         {
-                                            primary_text.0.clone()
+                                            FastStr::from(primary_text_str.to_string()) // Only primary text for these specific items.
                                         }
-                                        _ if primary_text.0.chars().count() >= 7 => {
-                                            secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
+                                        // If primary text is moderately long, use a newline separator.
+                                        _ if primary_text_str.chars().count() >= 7 => {
+                                            secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_NEWLINE)
                                         }
-                                        // else
-                                        _ => secondary_text_combined(primary_text, secondary_text, SEPARATOR_SLASH),
+                                        // Default for items: use a slash separator.
+                                        _ => secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_SLASH),
                                     }
                                 }
                                 "text_ui_soul.xml" => match true {
-                                    _ if primary_text.0.chars().count() <= 7 && primary_text.0 != "MISSING"
-                                        || primary_text.0.chars().count() <= 12 && entry_id.0.contains("stat_") =>
+                                    // Short texts or specific stat entries use a slash separator.
+                                    _ if primary_text_str.chars().count() <= 7 && primary_text_str != "MISSING"
+                                        || primary_text_str.chars().count() <= 12 && entry_id.0.contains("stat_") =>
                                     {
-                                        secondary_text_combined(primary_text, secondary_text, SEPARATOR_SLASH)
+                                        secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_SLASH)
                                     }
-                                    _ if 
-                                    // (entry_id.0.contains("buff") && entry_id.0.contains("desc") && !entry_id.0.contains("drunkenness_desc"))
-                                    //     || (entry_id.0.contains("perk") && entry_id.0.contains("_desc") && !entry_id.0.contains("perk_ironclad_desc")) 
-                                        primary_text.0.chars().count() + secondary_text.chars().count() < 1000 =>
-                                    {
-                                        secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
+                                    // Longer texts, provided they don't exceed a combined character limit, use a newline.
+                                    _ if primary_text_str.chars().count() + secondary_text_str.chars().count() < 1000 => {
+                                        secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_NEWLINE)
                                     }
-                                    _ => primary_text.0.clone().into(),
+                                    // Very long texts, just use the primary text.
+                                    _ => primary_text_str.to_string().into(),
                                 },
                                 _ => {
-                                    // Default case for other files
-                                    if secondary_text != "MISSING" {
-                                        format!("{}{}{}", primary_text.0, SEPARATOR_SLASH, secondary_text).into()
+                                    // Default case for any other XML files: combine with slash.
+                                    // If secondary text is missing, fall back to English text.
+                                    let fallback_text = if secondary_text_str != "MISSING" {
+                                        secondary_text_str
                                     } else {
-                                        format!("{}{}{}", primary_text.0, SEPARATOR_SLASH, english_text).into()
-                                    }
+                                        english_text_str
+                                    };
+                                    format!("{}{}{}", primary_text_str, SEPARATOR_SLASH, fallback_text).into()
                                 }
                             };
 
+                            // Construct the XML Row.
+                            // The second <Cell> will contain the original source text (e.g., English from the 2nd cell of the primary language file).
+                            // The third <Cell> contains the combined bilingual text.
                             rows.push(format!(
                                 "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{}</Cell></Row>",
-                                entry_id.0, primary_text.0, combined_text
+                                entry_id.0, primary_entry.source_text, combined_text
                             ));
                         }
                     }
                     Err(e) => {
-                        // Log the error or store it for further handling
-                        eprintln!("Error: {:?}", e);
-                        // Continue with an empty map for primary_entries
-                        for (entry_id, _) in empty_map {
-                            let english_text = english_entries.get(&entry_id).map(|lv| lv.0.as_str()).unwrap_or("MISSING");
-
+                        // Log an error if primary entries for a file couldn't be loaded.
+                        eprintln!("Error retrieving primary entries for file {}: {:?}", file_name, e);
+                        // As a fallback, use English entries if primary entries are unavailable.
+                        for (entry_id, english_entry) in english_entries.iter() {
                             rows.push(format!(
                                 "<Row><Cell>{}</Cell><Cell>{}</Cell><Cell>{}</Cell></Row>",
-                                entry_id.0, english_text, english_text
+                                entry_id.0, english_entry.source_text, english_entry.translated_text
                             ));
                         }
                     }
                 }
-                // Write to file
+
+                // Assemble the full XML content and determine the output path.
                 let xml_content = format!("<Table>\n{}\n</Table>", rows.join("\n"));
                 let xml_output_path = xml_output_dir.join(file_name);
 
-                // Push the path to the output set
-                let mut xml_output_set = xml_output_set.lock().unwrap();
-                xml_output_set.push(xml_output_path.clone());
+                // Add the output path to the shared list in a thread-safe manner.
+                let mut xml_output_set_guard = xml_output_set.lock().unwrap();
+                xml_output_set_guard.push(xml_output_path.clone());
+                drop(xml_output_set_guard); // Explicitly drop the guard to release the lock early.
 
+                // Write the generated XML content to the file.
                 std::fs::write(&xml_output_path, xml_content)
-                    .map_err(|e| BilingualGeneratorError::XmlProcessingFailed(format!("Error processing XML: {}", e)))
-                    .unwrap();
+                    .map_err(|e| BilingualGeneratorError::XmlProcessingFailed(format!("Error writing XML file {}: {}", xml_output_path.display(), e)))
+                    .unwrap(); // Using unwrap here; the error is logged and process continues for other files.
             }
         });
 
-        // Get locked access to the path list
+        // After all parallel processing is complete, collect the generated XML file paths.
         let generated_xml_paths: Vec<PathBuf> = xml_output_set.into_inner().unwrap();
-        // After parallel processing, merge results and proceed
+
+        // Attempt to create a new PAK file from the generated XML files.
         match create_new_pak(generated_xml_paths.clone(), &xml_output_dir, primary_language) {
             Ok(_) => {
-                // Parallel file deletion
+                // If PAK creation is successful, delete the temporary XML files in parallel.
                 generated_xml_paths.par_iter().for_each(|path| {
                     if let Err(e) = std::fs::remove_file(path) {
-                        eprintln!("[Cleanup] Failed to delete {}: {}", path.display(), e);
+                        eprintln!("[Cleanup] Failed to delete temporary XML file {}: {}", path.display(), e);
                     }
                 });
 
+                // Return the path to the output directory.
                 Ok(xml_output_dir)
             }
-            Err(_) => Err(BilingualGeneratorError::PakCreationFailed),
+            Err(e) => {
+                // If PAK creation fails, log the error and return a PakCreationFailed error.
+                eprintln!("Failed to create PAK file: {:?}", e);
+                Err(BilingualGeneratorError::PakCreationFailed)
+            }
         }
     }
 }

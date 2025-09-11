@@ -1,4 +1,4 @@
-use super::{bilingual_generator::LastTextValue, bilingual_generator_errors::BilingualGeneratorError};
+use super::bilingual_generator_errors::BilingualGeneratorError;
 use faststr::FastStr;
 use std::{
     fs::File,
@@ -16,11 +16,14 @@ pub static SEPARATOR_SLASH: &str = " / ";
 // pub static SEPARATOR_MINUS: &str = " - ";
 pub static SEPARATOR_NEWLINE: &str = "\\n ";
 
-pub fn secondary_text_combined(primary_text: &LastTextValue, secondary_text: &str, separator: &str) -> FastStr {
+/// Combines primary and secondary text with a separator.
+///
+/// If the secondary text is "MISSING" or empty, it returns only the primary text.
+pub fn secondary_text_combined(primary_text: &str, secondary_text: &str, separator: &str) -> FastStr {
     if secondary_text != "MISSING" && !secondary_text.is_empty() {
-        format!("{}{}{}", primary_text.0, separator, secondary_text).into()
+        format!("{}{}{}", primary_text, separator, secondary_text).into()
     } else {
-        primary_text.0.clone().into() // Fallback to primary if secondary is missing/empty
+        primary_text.to_string().into() // Fallback to primary if secondary is missing/empty
     }
 }
 
