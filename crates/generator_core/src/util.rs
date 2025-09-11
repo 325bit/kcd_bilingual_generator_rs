@@ -12,8 +12,9 @@ use zip::{
 // Define separators
 // Use actual newline '\n' if the target system/game expects that.
 // Use escaped "\\n" if the target system expects the literal characters '\' and 'n'.
-pub static SEPARATOR_SLASH: &str = "/";
-pub static SEPARATOR_NEWLINE: &str = "\\n";
+pub static SEPARATOR_SLASH: &str = " / ";
+// pub static SEPARATOR_MINUS: &str = " - ";
+pub static SEPARATOR_NEWLINE: &str = "\\n ";
 
 pub fn secondary_text_combined(primary_text: &LastTextValue, secondary_text: &str, separator: &str) -> FastStr {
     if secondary_text != "MISSING" && !secondary_text.is_empty() {

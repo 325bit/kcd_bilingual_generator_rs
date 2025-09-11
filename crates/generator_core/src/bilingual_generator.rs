@@ -50,6 +50,7 @@ impl BilingualGenerator {
             String::from("text_ui_soul.xml"),      // Stats/Effects
             String::from("text_ui_items.xml"),     // Items
             String::from("text_ui_menus.xml"),     // Menus
+            String::from("text_ui_misc.xml"),
         ];
         let defaut_language_to_process = vec![
             String::from("Chineses"),
@@ -157,27 +158,47 @@ impl BilingualGenerator {
                 let mut single_data = IndexMap::new();
                 let mut current_cells: Vec<String> = Vec::with_capacity(4); // Pre-allocate
                 let mut inside_row = false;
+                let mut cell_index: usize = 0;
 
                 loop {
                     match reader.read_event_into(&mut buf) {
                         Ok(Event::Start(e)) if e.name().as_ref() == b"Row" => {
                             inside_row = true;
                             current_cells.clear();
+                            cell_index = 0; // Reset cell index for a new row
                         }
                         Ok(Event::End(e)) if e.name().as_ref() == b"Row" => {
                             inside_row = false;
                             if !current_cells.is_empty() && current_cells[0] != "Entry id" {
+                                // Ensure we have at least 3 cells for EntryId and LastTextValue
                                 if current_cells.len() >= 3 {
                                     single_data.insert(EntryId(current_cells[0].clone().into()), LastTextValue(current_cells[2].clone().into()));
                                 }
                             }
                         }
+                        // New: Handle <Cell> start tag
+                        Ok(Event::Start(e)) if inside_row && e.name().as_ref() == b"Cell" => {
+                            // We are now inside a cell. No action needed here, just a state change.
+                            // The text event handler will know to capture text if inside_row is true.
+                        }
+                        // New: Handle <Cell> end tag
+                        Ok(Event::End(e)) if inside_row && e.name().as_ref() == b"Cell" => {
+                            cell_index += 1; // Increment cell index after a cell ends
+                        }
                         Ok(Event::Text(e)) => {
+                            // Only capture text if we are inside a row and this text is within a <Cell>
                             if inside_row {
                                 // Read the raw text (including escaped entities) as a string
                                 let raw_text = std::str::from_utf8(e.as_ref())
                                     .map_err(|_| BilingualGeneratorError::XmlProcessingFailed("Invalid UTF-8 in XML text".to_string()))?;
-                                current_cells.push(raw_text.to_string());
+
+                                // Ensure current_cells has enough capacity for the current cell_index
+                                // If a cell is empty (e.g., <Cell></Cell>), no text event will be emitted for it.
+                                // We need to fill in empty strings for missing cells to maintain correct indexing.
+                                while current_cells.len() <= cell_index {
+                                    current_cells.push("".to_string()); // Fill with empty strings for skipped cells
+                                }
+                                current_cells[cell_index] = raw_text.to_string();
                             }
                         }
                         Ok(Event::Eof) => break,
@@ -211,10 +232,7 @@ impl BilingualGenerator {
         let primary_lang = Language(primary_language.to_string().into());
         let secondary_lang = Language(secondary_language.to_string().into());
 
-        // Define separators
-        // let SEPARATOR_SLASH = "/";
-        // let SEPARATOR_NEWLINE = "\\n";
-        let menutext_too_long = ["ui_state_health_desc", "ui_state_hunger_desc", "ui_DerivStat_MaxStamina_desc"];
+        // let menutext_too_long = ["ui_state_health_desc", "ui_state_hunger_desc", "ui_DerivStat_MaxStamina_desc"];
         // Process each XML file in parallel
         self.files_to_process.par_iter().for_each(|file_name| {
             let xml_file = XmlFile(file_name.clone().into());
@@ -249,7 +267,9 @@ impl BilingualGenerator {
                                             _ if entry_id.0.contains("ui_loading") || entry_id.0.contains("codex_cont") => {
                                                 secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
                                             }
-                                            _ if primary_text.0.chars().count() <= 6 || menutext_too_long.contains(&&*entry_id.0) => {
+                                            _ if primary_text.0.chars().count() <= 6
+                                                || primary_text.0.chars().count() + secondary_text.chars().count() > 1040 =>
+                                            {
                                                 primary_text.0.clone().into()
                                             }
                                             _ if primary_text.0.chars().count() >= 20 => {
@@ -290,8 +310,10 @@ impl BilingualGenerator {
                                     {
                                         secondary_text_combined(primary_text, secondary_text, SEPARATOR_SLASH)
                                     }
-                                    _ if (entry_id.0.contains("buff") && entry_id.0.contains("desc") && !entry_id.0.contains("drunkenness_desc"))
-                                        || (entry_id.0.contains("perk") && entry_id.0.contains("_desc")) =>
+                                    _ if 
+                                    // (entry_id.0.contains("buff") && entry_id.0.contains("desc") && !entry_id.0.contains("drunkenness_desc"))
+                                    //     || (entry_id.0.contains("perk") && entry_id.0.contains("_desc") && !entry_id.0.contains("perk_ironclad_desc")) 
+                                        primary_text.0.chars().count() + secondary_text.chars().count() < 1000 =>
                                     {
                                         secondary_text_combined(primary_text, secondary_text, SEPARATOR_NEWLINE)
                                     }
