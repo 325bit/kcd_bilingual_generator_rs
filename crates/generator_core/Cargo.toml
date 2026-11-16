@@ -12,3 +12,8 @@ tokio = { version = "1.44.2", features = ["full"] }
 thiserror = "2.0.12"
 faststr = "0.2.31"
 path_finder = { path = "../path_finder" }
+
+[dev-dependencies]
+# Tests build throwaway game PAKs (they are plain ZIP archives) to exercise the generator
+# without a game install.
+zip = { version = "9.6.0", default-features = false, features = ["deflate"] }

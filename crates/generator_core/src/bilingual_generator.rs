@@ -13,7 +13,10 @@ use std::{
     fs::File,
     io::{BufRead, BufReader, Read},
     path::PathBuf,
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 use zip::ZipArchive;
 
@@ -28,6 +31,76 @@ pub struct BilingualGenerator {
     /// Where non-fatal diagnostics go. `None` falls back to stderr, which only works when the
     /// process actually owns a console (debug builds and headless runs).
     log_sink: Option<LogSink>,
+    /// Emit one diagnostic line per dialog reverse-lookup attempt. Off by default.
+    trace_reverse_lookup: bool,
+    lookup_triggers: AtomicUsize,
+    lookup_scanned: AtomicUsize,
+    lookup_self_hits: AtomicUsize,
+    lookup_other_hits: AtomicUsize,
+}
+
+/// How often the dialog reverse-lookup heuristic fired, and what it cost.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReverseLookupStats {
+    /// Entries whose secondary *and* English text were both `MISSING` — the only condition that
+    /// starts the search.
+    pub triggers: usize,
+    /// Primary-language entries examined while searching, summed over every trigger.
+    pub scanned: usize,
+    /// Searches that landed on the entry itself (it had its own `source_text` after all).
+    pub self_hits: usize,
+    /// Searches that borrowed *another* entry's `source_text` because it happened to carry the
+    /// same translation. This is the risky case: repeated lines ("Yes.", "Of course.") cannot be
+    /// told apart by text alone.
+    pub other_hits: usize,
+}
+
+impl ReverseLookupStats {
+    /// Triggers that ended with an empty secondary text.
+    pub fn no_hits(&self) -> usize {
+        self.triggers.saturating_sub(self.self_hits + self.other_hits)
+    }
+}
+
+/// Joins the two halves of a bilingual cell with `separator`, skipping empty halves.
+///
+/// The parser keeps rows whose text cells are empty (they are real table entries), so joining
+/// unconditionally would emit a lone separator — a blank subtitle line or a stray " / " in a
+/// menu. Dropping the empty half keeps such rows harmless.
+fn combine_text(primary: &str, secondary: &str, separator: &str) -> FastStr {
+    match (primary.is_empty(), secondary.is_empty()) {
+        (true, true) => String::new().into(),
+        (true, false) => secondary.to_string().into(),
+        (false, true) => primary.to_string().into(),
+        (false, false) => format!("{primary}{separator}{secondary}").into(),
+    }
+}
+
+/// Is there usable text in this cell?
+///
+/// A cell has no text in two shapes: the entry is missing from the table (`"MISSING"` sentinel
+/// used by the lookups below) or the entry exists with an empty cell (`""`, which the parser now
+/// keeps instead of dropping the row). Both must fall through to the next fallback.
+fn has_text(text: &str) -> bool {
+    !text.is_empty() && text != "MISSING"
+}
+
+/// Looks an entry up by its id, tolerating stray whitespace inside the id cell.
+///
+/// A few table rows carry line breaks or no-break spaces inside the id cell, and the exact
+/// characters differ per language pack — `ui_nm_TorsoPainter_m01\n\n` in the Chinese table is
+/// `ui_nm_TorsoPainter_m01\r\n\r\n` in the English one, so a plain key lookup misses. The common
+/// case is still an exact hit; the scan only runs when the id actually carries such whitespace.
+fn find_entry<'a>(entries: &'a IndexMap<EntryId, TextEntry>, id: &EntryId) -> Option<&'a TextEntry> {
+    if let Some(entry) = entries.get(id) {
+        return Some(entry);
+    }
+    let trimmed = id.0.trim();
+    if trimmed.len() == id.0.len() {
+        // Nothing to normalise, the entry is genuinely absent.
+        return None;
+    }
+    entries.iter().find(|(other, _)| other.0.trim() == trimmed).map(|(_, entry)| entry)
 }
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Language(pub FastStr);
@@ -85,6 +158,11 @@ impl BilingualGenerator {
             language_to_process: defaut_language_to_process,
             all_data: HashMap::new(),
             log_sink: None,
+            trace_reverse_lookup: false,
+            lookup_triggers: AtomicUsize::new(0),
+            lookup_scanned: AtomicUsize::new(0),
+            lookup_self_hits: AtomicUsize::new(0),
+            lookup_other_hits: AtomicUsize::new(0),
         })
     }
 
@@ -96,10 +174,39 @@ impl BilingualGenerator {
     /// Reports a recoverable problem. Never aborts the run: generation keeps going and the
     /// message surfaces in the GUI messages area (or stderr when no sink is installed).
     fn warn(&self, message: impl Into<String>) {
-        let message = message.into();
+        self.emit(message.into());
+    }
+
+    /// Verbose diagnostics for the dialog reverse-lookup heuristic. Only called while
+    /// [`Self::set_trace_reverse_lookup`] is on, so normal runs stay quiet.
+    fn trace(&self, message: impl Into<String>) {
+        self.emit(message.into());
+    }
+
+    fn emit(&self, message: String) {
         match &self.log_sink {
             Some(sink) => sink.log(message),
             None => eprintln!("{message}"),
+        }
+    }
+
+    /// Turns on per-lookup tracing for the dialog reverse-lookup heuristic.
+    ///
+    /// Each trigger then emits one line describing what was searched for, how many entries were
+    /// scanned, and which entry (if any) supplied the fallback text. Counters are always
+    /// collected; this only controls the output.
+    pub fn set_trace_reverse_lookup(&mut self, enabled: bool) {
+        self.trace_reverse_lookup = enabled;
+    }
+
+    /// Snapshot of the dialog reverse-lookup heuristic for the **most recent**
+    /// [`Self::process_single_bilingual`] call.
+    pub fn reverse_lookup_stats(&self) -> ReverseLookupStats {
+        ReverseLookupStats {
+            triggers: self.lookup_triggers.load(Ordering::Relaxed),
+            scanned: self.lookup_scanned.load(Ordering::Relaxed),
+            self_hits: self.lookup_self_hits.load(Ordering::Relaxed),
+            other_hits: self.lookup_other_hits.load(Ordering::Relaxed),
         }
     }
     pub fn acquire_bilingual_set(&mut self) -> Result<Vec<(FastStr, FastStr)>, BilingualGeneratorError> {
@@ -183,42 +290,57 @@ impl BilingualGenerator {
                 let mut single_data = IndexMap::new();
                 let mut current_cells: Vec<String> = Vec::with_capacity(4); // Pre-allocate
                 let mut inside_row = false;
+                // Text is only meaningful between `<Cell>` and `</Cell>`; the whitespace that
+                // separates cells in a pretty-printed table must not become cell content.
+                let mut inside_cell = false;
                 let mut cell_index: usize = 0;
 
                 loop {
                     match reader.read_event_into(&mut buf) {
                         Ok(Event::Start(e)) if e.name().as_ref() == b"Row" => {
                             inside_row = true;
+                            inside_cell = false;
                             current_cells.clear();
                             cell_index = 0; // Reset cell index for a new row
                         }
                         Ok(Event::End(e)) if e.name().as_ref() == b"Row" => {
                             inside_row = false;
-                            if !current_cells.is_empty() && current_cells[0] != "Entry id" {
-                                // Ensure we have at least 3 cells for EntryId and LastTextValue
-                                if current_cells.len() >= 3 {
+                            inside_cell = false;
+                            // Only the entry id is mandatory. Text cells are allowed to be
+                            // empty (`<Cell></Cell>` / `<Cell/>`), so rows must not be dropped
+                            // just because they carry fewer than three cells: dropping them
+                            // made every later reverse lookup fall through to an unrelated
+                            // row whose text happened to be equal.
+                            match current_cells.first() {
+                                Some(id) if !id.is_empty() && id != "Entry id" => {
                                     let entry = TextEntry {
-                                        // If the second cell is empty, store an empty string too
+                                        // Missing or empty second cell becomes an empty string.
                                         source_text: current_cells.get(1).cloned().unwrap_or_default().into(),
-                                        // the third cell
+                                        // Missing or empty third cell becomes an empty string.
                                         translated_text: current_cells.get(2).cloned().unwrap_or_default().into(),
                                     };
-                                    single_data.insert(EntryId(current_cells[0].clone().into()), entry);
+                                    single_data.insert(EntryId(id.clone().into()), entry);
                                 }
+                                _ => {}
                             }
                         }
-                        // New: Handle <Cell> start tag
+                        // We are now inside a cell: the text handler may capture content.
                         Ok(Event::Start(e)) if inside_row && e.name().as_ref() == b"Cell" => {
-                            // We are now inside a cell. No action needed here, just a state change.
-                            // The text event handler will know to capture text if inside_row is true.
+                            inside_cell = true;
                         }
-                        // New: Handle <Cell> end tag
                         Ok(Event::End(e)) if inside_row && e.name().as_ref() == b"Cell" => {
+                            inside_cell = false;
                             cell_index += 1; // Increment cell index after a cell ends
                         }
+                        // A self-closing cell (`<Cell/>`) emits no text event, but it still
+                        // occupies a position inside the row, so advance the index to keep
+                        // the remaining columns aligned.
+                        Ok(Event::Empty(e)) if inside_row && e.name().as_ref() == b"Cell" => {
+                            cell_index += 1;
+                        }
                         Ok(Event::Text(e)) => {
-                            // Only capture text if we are inside a row and this text is within a <Cell>
-                            if inside_row {
+                            // Only capture text that actually belongs to a <Cell>.
+                            if inside_row && inside_cell {
                                 // Read the raw text (including escaped entities) as a string
                                 let raw_text = std::str::from_utf8(e.as_ref())
                                     .map_err(|_| BilingualGeneratorError::XmlProcessingFailed("Invalid UTF-8 in XML text".to_string()))?;
@@ -251,6 +373,12 @@ impl BilingualGenerator {
     }
 
     pub fn process_single_bilingual(&self, primary_language: &str, secondary_language: &str) -> Result<PathBuf, BilingualGeneratorError> {
+        // The counters describe a single call, so start from zero every time.
+        self.lookup_triggers.store(0, Ordering::Relaxed);
+        self.lookup_scanned.store(0, Ordering::Relaxed);
+        self.lookup_self_hits.store(0, Ordering::Relaxed);
+        self.lookup_other_hits.store(0, Ordering::Relaxed);
+
         // Create output directory for the bilingual XML files
         let xml_output_dir = self
             .working_dir
@@ -298,31 +426,62 @@ impl BilingualGenerator {
                             let primary_text_str = primary_entry.translated_text.as_str();
 
                             // Get the secondary language's translated text. Default to "MISSING" if not found.
-                            let mut secondary_text_str = secondary_entries.get(entry_id).map(|e| e.translated_text.as_str()).unwrap_or("MISSING");
+                            let mut secondary_text_str = find_entry(secondary_entries, entry_id).map(|e| e.translated_text.as_str()).unwrap_or("MISSING");
 
                             // Get the English translated text. Default to "MISSING" if not found.
-                            let english_text_str = english_entries.get(entry_id).map(|e| e.translated_text.as_str()).unwrap_or("MISSING");
+                            let english_text_str = find_entry(english_entries, entry_id).map(|e| e.translated_text.as_str()).unwrap_or("MISSING");
 
                             // --- START OF NEW LOGIC: Reverse-lookup for missing secondary/English text in text_ui_dialog.xml ---
                             // This block addresses the specific scenario where an entry in the primary language
                             // (e.g., Chinese) exists, but its corresponding secondary language (e.g., English, as source text)
-                            // and fallback English are both "MISSING".
+                            // and fallback English are both missing — either because the row is absent from the
+                            // table or because the table carries an empty cell for it.
                             if file_name == "text_ui_dialog.xml"
-                                && secondary_text_str == "MISSING"
-                                && english_text_str == "MISSING"
+                                && !has_text(secondary_text_str)
+                                && !has_text(english_text_str)
                                 && !primary_text_str.is_empty()
                             // Ensure primary text is not empty before attempting lookup
                             {
                                 // Iterate over all primary language entries (again) to find a potential match.
-                                for (_other_id, other_entry) in entries.iter() {
+                                let mut scanned = 0usize;
+                                let mut hit: Option<(&str, &str)> = None;
+                                for (other_id, other_entry) in entries.iter() {
+                                    scanned += 1;
                                     // If another entry has the same translated text as the current primary text
                                     // AND its `source_text` (from the 2nd cell, typically the original English) is not empty,
                                     // then we've found a suitable replacement.
                                     if other_entry.translated_text == primary_entry.translated_text && !other_entry.source_text.is_empty() {
                                         // Use this non-empty source text to fill the `secondary_text_str` gap.
-                                        secondary_text_str = other_entry.source_text.as_str();
+                                        let other_id: &str = &other_id.0;
+                                        let source_text: &str = &other_entry.source_text;
+                                        hit = Some((other_id, source_text));
+                                        secondary_text_str = source_text;
                                         break; // Found a suitable replacement, exit this inner search loop.
                                     }
+                                }
+
+                                let this_id: &str = &entry_id.0;
+                                let self_hit = matches!(hit, Some((id, _)) if id == this_id);
+                                self.lookup_triggers.fetch_add(1, Ordering::Relaxed);
+                                self.lookup_scanned.fetch_add(scanned, Ordering::Relaxed);
+                                match (hit, self_hit) {
+                                    (Some(_), true) => self.lookup_self_hits.fetch_add(1, Ordering::Relaxed),
+                                    (Some(_), false) => self.lookup_other_hits.fetch_add(1, Ordering::Relaxed),
+                                    (None, _) => 0,
+                                };
+
+                                if self.trace_reverse_lookup {
+                                    let outcome = match hit {
+                                        Some((id, source)) if self_hit => format!("hit=self id={id} source={source:?}"),
+                                        Some((id, source)) => {
+                                            format!("hit=OTHER id={id} source={source:?} (borrowed from a different line)")
+                                        }
+                                        None => "hit=none".to_string(),
+                                    };
+                                    self.trace(format!(
+                                        "[lookup] file={file_name} id={this_id} text={primary_text_str:?} scanned={scanned}/{total} -> {outcome}",
+                                        total = entries.len()
+                                    ));
                                 }
                             }
                             // --- END OF NEW LOGIC ---
@@ -355,10 +514,10 @@ impl BilingualGenerator {
                                 }
                                 "text_ui_dialog.xml" => {
                                     // Use the (potentially corrected by reverse-lookup) secondary text.
-                                    // If still "MISSING", fall back to the English text.
-                                    let fallback_text = if secondary_text_str != "MISSING" {
+                                    // If it has no text at all, fall back to the English text.
+                                    let fallback_text = if has_text(secondary_text_str) {
                                         secondary_text_str
-                                    } else if english_text_str != "MISSING" {
+                                    } else if has_text(english_text_str) {
                                         english_text_str
                                     } else {
                                         #[cfg(debug_assertions)]
@@ -370,7 +529,10 @@ impl BilingualGenerator {
                                             ""
                                         }
                                     };
-                                    format!("{}{}{}", primary_text_str, SEPARATOR_NEWLINE, fallback_text).into()
+                                    // Rows from the source table may legitimately have empty
+                                    // cells. Joining them unconditionally would produce a lone
+                                    // separator, i.e. a blank subtitle line or a stray slash.
+                                    combine_text(primary_text_str, fallback_text, SEPARATOR_NEWLINE)
                                 }
                                 "text_ui_items.xml" => {
                                     match true {
@@ -407,10 +569,10 @@ impl BilingualGenerator {
                                 },
                                 _ => {
                                     // Default case for any other XML files: combine with slash.
-                                    // If secondary text is missing, fall back to English text.
-                                    let fallback_text = if secondary_text_str != "MISSING" {
+                                    // If secondary text has no text at all, fall back to English text.
+                                    let fallback_text = if has_text(secondary_text_str) {
                                         secondary_text_str
-                                    } else if english_text_str != "MISSING" {
+                                    } else if has_text(english_text_str) {
                                         english_text_str
                                     } else {
                                         #[cfg(debug_assertions)]
@@ -422,7 +584,7 @@ impl BilingualGenerator {
                                             ""
                                         }
                                     };
-                                    format!("{}{}{}", primary_text_str, SEPARATOR_SLASH, fallback_text).into()
+                                    combine_text(primary_text_str, fallback_text, SEPARATOR_SLASH)
                                 }
                             };
 
