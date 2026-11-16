@@ -3,13 +3,20 @@ use path_finder::PathFinder;
 use rayon::prelude::*;
 use std::{
     path::PathBuf,
-    sync::mpsc::{Receiver, TryRecvError, channel},
+    sync::{
+        Arc, Mutex,
+        mpsc::{Receiver, TryRecvError, channel},
+    },
     time::{Duration, Instant},
 };
 
-use generator_core::{bilingual_generator::BilingualGenerator, bilingual_generator_errors::BilingualGeneratorError};
+use generator_core::{bilingual_generator::BilingualGenerator, bilingual_generator_errors::BilingualGeneratorError, log::LogSink};
 
 type GenerationResult = Result<Vec<String>, BilingualGeneratorError>;
+
+/// Shared buffer the worker thread appends diagnostics to. Drained into `messages` every frame,
+/// so warnings show up while generation is still running and survive a later failure.
+type LogBuffer = Arc<Mutex<Vec<String>>>;
 
 pub struct GuiBilingualPakGenerator {
     game_location: PathBuf,
@@ -22,6 +29,7 @@ pub struct GuiBilingualPakGenerator {
 /// the worker only ignores the send error and exits.
 struct PendingJob {
     rx: Receiver<GenerationResult>,
+    log: LogBuffer,
     started_at: Instant,
 }
 
@@ -50,43 +58,72 @@ impl GuiBilingualPakGenerator {
         Self::default()
     }
 
-    /// Non-blocking result check for the background job. Requests a repaint while it is running
-    /// so the elapsed time keeps ticking even without user input.
+    /// Appends one line, keeping the buffer newline-terminated.
+    fn push_message(&mut self, line: &str) {
+        if !self.messages.is_empty() && !self.messages.ends_with('\n') {
+            self.messages.push('\n');
+        }
+        self.messages.push_str(line);
+        self.messages.push('\n');
+    }
+
+    /// Drains worker diagnostics and, once the job finishes, reports its outcome.
+    /// Requests a repaint while the job runs so warnings and the elapsed clock keep moving.
     fn poll_job(&mut self, ctx: &egui::Context) {
-        let outcome = match self.pending.as_ref() {
-            None => return,
-            Some(job) => match job.rx.try_recv() {
-                Ok(Ok(lines)) => JobOutcome::Finished {
-                    lines,
-                    elapsed: job.started_at.elapsed(),
-                },
-                Ok(Err(e)) => JobOutcome::Failed {
-                    message: format!("{e:?}"),
-                    elapsed: job.started_at.elapsed(),
-                },
-                Err(TryRecvError::Empty) => {
-                    ctx.request_repaint_after(Duration::from_millis(100));
-                    return;
-                }
-                Err(TryRecvError::Disconnected) => JobOutcome::Failed {
-                    message: "generation thread exited without sending a result (panicked?)".to_string(),
-                    elapsed: job.started_at.elapsed(),
-                },
-            },
+        let mut drained: Vec<String> = Vec::new();
+        let mut outcome: Option<JobOutcome> = None;
+
+        let Some(job) = self.pending.as_ref() else {
+            return;
         };
 
+        if let Ok(mut buffer) = job.log.lock() {
+            drained = std::mem::take(&mut *buffer);
+        }
+
+        match job.rx.try_recv() {
+            Ok(Ok(lines)) => {
+                outcome = Some(JobOutcome::Finished {
+                    lines,
+                    elapsed: job.started_at.elapsed(),
+                });
+            }
+            Ok(Err(e)) => {
+                outcome = Some(JobOutcome::Failed {
+                    // Display, not Debug: PakOperationFailed already embeds operation/context/source.
+                    message: format!("{e}"),
+                    elapsed: job.started_at.elapsed(),
+                });
+            }
+            Err(TryRecvError::Empty) => {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            Err(TryRecvError::Disconnected) => {
+                outcome = Some(JobOutcome::Failed {
+                    message: "generation thread exited without sending a result (panicked?)".to_string(),
+                    elapsed: job.started_at.elapsed(),
+                });
+            }
+        }
+
+        for line in drained {
+            self.push_message(&line);
+        }
+
+        let Some(outcome) = outcome else {
+            return;
+        };
         self.pending = None;
         match outcome {
             JobOutcome::Finished { lines, elapsed } => {
                 for message in lines {
-                    self.messages.push_str(&message);
-                    self.messages.push('\n');
+                    self.push_message(&message);
                 }
-                self.messages.push_str(&format!("in {:.2} seconds\n", elapsed.as_secs_f64()));
+                self.push_message(&format!("in {:.2} seconds", elapsed.as_secs_f64()));
             }
             JobOutcome::Failed { message, elapsed } => {
-                self.messages.push_str(&format!("{message}\n"));
-                self.messages.push_str(&format!("failed after {:.2} seconds\n", elapsed.as_secs_f64()));
+                self.push_message(&message);
+                self.push_message(&format!("failed after {:.2} seconds", elapsed.as_secs_f64()));
             }
         }
     }
@@ -96,26 +133,38 @@ impl GuiBilingualPakGenerator {
             return;
         }
 
-        self.messages.push_str("Starting generation process...\n");
+        self.push_message("Starting generation process...");
+
+        let log: LogBuffer = Arc::new(Mutex::new(Vec::new()));
+        let sink = LogSink::new({
+            let log = Arc::clone(&log);
+            move |line| {
+                if let Ok(mut buffer) = log.lock() {
+                    buffer.push(line);
+                }
+            }
+        });
 
         let game_location = self.game_location.clone();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
             // A closed receiver means the app is gone; ignoring the error is intentional.
-            let _ = tx.send(run_generation(game_location));
+            let _ = tx.send(run_generation(game_location, sink));
         });
 
         self.pending = Some(PendingJob {
             rx,
+            log,
             started_at: Instant::now(),
         });
     }
 }
 
 /// Runs the whole pipeline off the UI thread.
-fn run_generation(game_location: PathBuf) -> GenerationResult {
+fn run_generation(game_location: PathBuf, log_sink: LogSink) -> GenerationResult {
     let mut generator = BilingualGenerator::init()?;
     generator.game_path = game_location;
+    generator.set_log_sink(log_sink);
     let bilingual_set = generator.acquire_bilingual_set()?;
     generator.read_xml_from_paks()?;
 
@@ -129,6 +178,27 @@ fn run_generation(game_location: PathBuf) -> GenerationResult {
         .collect::<Result<Vec<String>, _>>()
 }
 
+/// egui bundles no CJK glyphs, so Chinese text — for example the localised `io::Error` messages
+/// Windows produces for "access denied" — renders as tofu boxes. Borrow a system font as a
+/// fallback so the messages area stays readable; Latin text keeps using Times New Roman.
+fn install_cjk_fallback(fonts: &mut egui::FontDefinitions) {
+    let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".to_string());
+    let font_dir = std::path::Path::new(&windir).join("Fonts");
+
+    // Plain .ttf first: a TrueType collection would need a face index.
+    for name in ["Deng.ttf", "msyh.ttc", "SimsunExtG.ttf"] {
+        let Ok(bytes) = std::fs::read(font_dir.join(name)) else {
+            continue;
+        };
+        fonts.font_data.insert("cjk-fallback".to_owned(), egui::FontData::from_owned(bytes).into());
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            // Appended, not inserted: only characters missing from Times New Roman fall through.
+            fonts.families.entry(family).or_default().push("cjk-fallback".to_owned());
+        }
+        return;
+    }
+}
+
 /// Fonts and style are expensive to apply (they rebuild the font atlas), so this must not run per frame.
 fn configure_style(ctx: &egui::Context) {
     // Load and apply Times New Roman font
@@ -140,6 +210,7 @@ fn configure_style(ctx: &egui::Context) {
     for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
         fonts.families.entry(family).or_default().insert(0, "Times New Roman".to_owned());
     }
+    install_cjk_fallback(&mut fonts);
     ctx.set_fonts(fonts);
 
     // Customize text sizes, spacing and visuals
@@ -227,7 +298,8 @@ impl eframe::App for GuiBilingualPakGenerator {
             // Messages Area
             ui.vertical(|ui| {
                 ui.label("Messages:");
-                egui::ScrollArea::vertical().max_height(150.0).stick_to_bottom(true).show(ui, |ui| {
+                // Taller than before: warnings add several lines per run and must not be cut off.
+                egui::ScrollArea::vertical().max_height(260.0).stick_to_bottom(true).show(ui, |ui| {
                     ui.add(
                         egui::TextEdit::multiline(&mut self.messages)
                             .font(egui::FontId::new(14.0, egui::FontFamily::Monospace))

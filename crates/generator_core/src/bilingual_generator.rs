@@ -1,6 +1,7 @@
 use crate::util::{SEPARATOR_NEWLINE, SEPARATOR_SLASH, create_new_pak, secondary_text_combined};
 
 use super::bilingual_generator_errors::BilingualGeneratorError;
+use crate::log::LogSink;
 use faststr::FastStr;
 use indexmap::IndexMap;
 use path_finder::PathFinder;
@@ -24,6 +25,9 @@ pub struct BilingualGenerator {
     pub files_to_process: Vec<String>,
     pub language_to_process: Vec<String>,
     pub all_data: HashMap<XmlFile, HashMap<Language, IndexMap<EntryId, TextEntry>>>,
+    /// Where non-fatal diagnostics go. `None` falls back to stderr, which only works when the
+    /// process actually owns a console (debug builds and headless runs).
+    log_sink: Option<LogSink>,
 }
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Language(pub FastStr);
@@ -80,7 +84,23 @@ impl BilingualGenerator {
             files_to_process,
             language_to_process: defaut_language_to_process,
             all_data: HashMap::new(),
+            log_sink: None,
         })
+    }
+
+    /// Routes non-fatal diagnostics to `sink` instead of stderr.
+    pub fn set_log_sink(&mut self, sink: LogSink) {
+        self.log_sink = Some(sink);
+    }
+
+    /// Reports a recoverable problem. Never aborts the run: generation keeps going and the
+    /// message surfaces in the GUI messages area (or stderr when no sink is installed).
+    fn warn(&self, message: impl Into<String>) {
+        let message = message.into();
+        match &self.log_sink {
+            Some(sink) => sink.log(message),
+            None => eprintln!("{message}"),
+        }
     }
     pub fn acquire_bilingual_set(&mut self) -> Result<Vec<(FastStr, FastStr)>, BilingualGeneratorError> {
         let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::new());
@@ -416,8 +436,10 @@ impl BilingualGenerator {
                         }
                     }
                     Err(e) => {
-                        // Log an error if primary entries for a file couldn't be loaded.
-                        eprintln!("Error retrieving primary entries for file {}: {:?}", file_name, e);
+                        // Report, then fall back to English so this language pair still gets rows.
+                        self.warn(format!(
+                            "{file_name}: could not load `{primary_language}` entries ({e}); falling back to English text"
+                        ));
                         // As a fallback, use English entries if primary entries are unavailable.
                         for (entry_id, english_entry) in english_entries.iter() {
                             rows.push(format!(
@@ -432,15 +454,22 @@ impl BilingualGenerator {
                 let xml_content = format!("<Table>\n{}\n</Table>", rows.join("\n"));
                 let xml_output_path = xml_output_dir.join(file_name);
 
-                // Add the output path to the shared list in a thread-safe manner.
-                let mut xml_output_set_guard = xml_output_set.lock().unwrap();
-                xml_output_set_guard.push(xml_output_path.clone());
-                drop(xml_output_set_guard); // Explicitly drop the guard to release the lock early.
-
-                // Write the generated XML content to the file.
-                std::fs::write(&xml_output_path, xml_content)
-                    .map_err(|e| BilingualGeneratorError::XmlProcessingFailed(format!("Error writing XML file {}: {}", xml_output_path.display(), e)))
-                    .unwrap(); // Using unwrap here; the error is logged and process continues for other files.
+                // Write first, then register the path: a failed write must not leave a path in the
+                // pak list, otherwise PAK creation would trip over the missing file later.
+                match std::fs::write(&xml_output_path, xml_content) {
+                    Ok(()) => {
+                        let mut xml_output_set_guard = xml_output_set.lock().unwrap();
+                        xml_output_set_guard.push(xml_output_path);
+                    }
+                    Err(e) => {
+                        self.warn(format!(
+                            "{file_name}: failed to write generated XML to {} ({e}); this file is left out of the pak",
+                            xml_output_path.display()
+                        ));
+                    }
+                }
+            } else {
+                self.warn(format!("{file_name}: skipped, the XML file is missing from the loaded paks"));
             }
         });
 
@@ -448,23 +477,17 @@ impl BilingualGenerator {
         let generated_xml_paths: Vec<PathBuf> = xml_output_set.into_inner().unwrap();
 
         // Attempt to create a new PAK file from the generated XML files.
-        match create_new_pak(generated_xml_paths.clone(), &xml_output_dir, primary_language) {
-            Ok(_) => {
-                // If PAK creation is successful, delete the temporary XML files in parallel.
-                generated_xml_paths.par_iter().for_each(|path| {
-                    if let Err(e) = std::fs::remove_file(path) {
-                        eprintln!("[Cleanup] Failed to delete temporary XML file {}: {}", path.display(), e);
-                    }
-                });
+        // Propagate the underlying error verbatim instead of collapsing it to PakCreationFailed:
+        // the GUI has no console, so this message is the only diagnostic the user will ever see.
+        create_new_pak(generated_xml_paths.clone(), &xml_output_dir, primary_language)?;
 
-                // Return the path to the output directory.
-                Ok(xml_output_dir)
+        // PAK creation succeeded, so the temporary XML files are no longer needed.
+        generated_xml_paths.par_iter().for_each(|path| {
+            if let Err(e) = std::fs::remove_file(path) {
+                self.warn(format!("could not delete temporary XML file {} ({e})", path.display()));
             }
-            Err(e) => {
-                // If PAK creation fails, log the error and return a PakCreationFailed error.
-                eprintln!("Failed to create PAK file: {:?}", e);
-                Err(BilingualGeneratorError::PakCreationFailed)
-            }
-        }
+        });
+
+        Ok(xml_output_dir)
     }
 }
