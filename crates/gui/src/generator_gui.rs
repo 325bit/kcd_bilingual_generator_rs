@@ -379,7 +379,7 @@ impl eframe::App for GuiBilingualPakGenerator {
                 egui::ScrollArea::vertical().id_salt("bilingual_set_list").max_height(160.0).show(ui, |ui| {
                     egui::Frame::new()
                         .fill(ui.visuals().extreme_bg_color)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(76)))
+                        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(76)))
                         .corner_radius(3)
                         .inner_margin(egui::Margin::symmetric(6, 4))
                         .show(ui, |ui| {
