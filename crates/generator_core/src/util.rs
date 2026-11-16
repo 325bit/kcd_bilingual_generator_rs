@@ -5,10 +5,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
-use zip::{
-    CompressionMethod, ZipWriter,
-    write::{ExtendedFileOptions, FileOptions},
-};
+use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 // Define separators
 // Use actual newline '\n' if the target system/game expects that.
 // Use escaped "\\n" if the target system expects the literal characters '\' and 'n'.
@@ -33,7 +30,7 @@ pub fn create_new_pak(files: Vec<PathBuf>, output_dir: &Path, primary_language: 
 
     let file = File::create(&pak_path).map_err(|_| BilingualGeneratorError::PakCreationFailed)?;
     let mut zip = ZipWriter::new(file);
-    let options: FileOptions<'_, ExtendedFileOptions> = FileOptions::default().compression_method(CompressionMethod::Deflated);
+    let options: SimpleFileOptions = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
     for path in files {
         let file_name = path.file_name().ok_or(BilingualGeneratorError::PakCreationFailed)?;
