@@ -2,9 +2,10 @@ use directories::UserDirs;
 use std::{
     fs,
     io::{Error, ErrorKind},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
-use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+
+const GAME_DIR_NAME: &str = "KingdomComeDeliverance2";
 
 pub struct PathFinder {
     game_path: PathBuf,
@@ -22,12 +23,12 @@ impl PathFinder {
     /// If a valid path is found, it stores it in `game_path` and returns it.
     /// Otherwise, it returns an error.
     pub fn find_game_path(&mut self) -> Result<&PathBuf, Error> {
-        if let Ok(steam_path) = Self::find_steam_installation() {
+        if let Ok(steam_path) = platform::find_steam_installation() {
             self.game_path = steam_path;
             return Ok(&self.game_path);
         }
 
-        if let Ok(gog_path) = Self::find_gog_installation() {
+        if let Ok(gog_path) = platform::find_gog_installation() {
             self.game_path = gog_path;
             return Ok(&self.game_path);
         }
@@ -35,14 +36,62 @@ impl PathFinder {
         // If neither installation is found, return an error.
         Err(Error::new(
             ErrorKind::NotFound,
-            "KingdomComeDeliverance2 installation not found in Steam or GOG",
+            format!("{GAME_DIR_NAME} installation not found in Steam or GOG"),
         ))
     }
+}
 
-    fn find_steam_installation() -> Result<PathBuf, Error> {
-        let steam_install_path = get_steam_install_path_from_registry()?;
+/// `<library_root>/steamapps/common/KingdomComeDeliverance2`, if it exists.
+fn game_path_in_library(library_root: &Path) -> Option<PathBuf> {
+    let game_path = library_root.join("steamapps").join("common").join(GAME_DIR_NAME);
+    game_path.exists().then_some(game_path)
+}
 
-        if let Some(path) = check_default_steam_library_path(&steam_install_path) {
+/// Resolves additional Steam library folders from `libraryfolders.vdf`.
+fn resolve_other_steam_library_paths(steam_install_path: &Path) -> Option<PathBuf> {
+    let vdf_path = steam_install_path.join("steamapps").join("libraryfolders.vdf");
+    let content = fs::read_to_string(vdf_path).ok()?;
+
+    // Search line by line for lines containing the "path" key.
+    // The expected line format is something like: `"path"		"X:\Some\Path"`
+    for line in content.lines() {
+        if line.contains("\"path\"") {
+            let parts: Vec<&str> = line.split('"').collect();
+            if parts.len() >= 4 {
+                if let Some(found) = game_path_in_library(Path::new(parts[3])) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// GOG installs the game either under a well-known "GOG Games" folder or a user-chosen one.
+fn find_gog_in_common_paths() -> Option<PathBuf> {
+    let mut candidates = vec![
+        PathBuf::from(r"C:\GOG Games").join(GAME_DIR_NAME),
+        PathBuf::from(r"D:\GOG Games").join(GAME_DIR_NAME),
+    ];
+
+    if let Some(user_dirs) = UserDirs::new() {
+        candidates.push(user_dirs.home_dir().join("GOG Games").join(GAME_DIR_NAME));
+    }
+
+    candidates.into_iter().find(|path| path.join("Data").exists())
+}
+
+#[cfg(windows)]
+mod platform {
+    use super::{Error, ErrorKind, find_gog_in_common_paths, game_path_in_library, resolve_other_steam_library_paths};
+    use std::path::{Path, PathBuf};
+    use winreg::{RegKey, enums::HKEY_LOCAL_MACHINE};
+
+    pub fn find_steam_installation() -> Result<PathBuf, Error> {
+        let steam_install_path = steam_install_path_from_registry()?;
+
+        if let Some(path) = game_path_in_library(&steam_install_path) {
             return Ok(path);
         }
 
@@ -50,120 +99,83 @@ impl PathFinder {
             return Ok(path);
         }
 
-        Err(Error::new(
-            ErrorKind::NotFound,
-            "KingdomComeDeliverance2 Steam installation not found",
-        ))
+        Err(Error::new(ErrorKind::NotFound, "KingdomComeDeliverance2 Steam installation not found"))
     }
 
-    fn find_gog_installation() -> Result<PathBuf, Error> {
-        // Check registry first
+    pub fn find_gog_installation() -> Result<PathBuf, Error> {
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-        let gog_keys = vec!["SOFTWARE\\GOG Galaxy", "SOFTWARE\\WOW6432Node\\GOG Galaxy"];
 
-        for key in gog_keys {
+        for key in ["SOFTWARE\\GOG Galaxy", "SOFTWARE\\WOW6432Node\\GOG Galaxy"] {
             if let Ok(gog_key) = hklm.open_subkey(key) {
                 if let Ok(install_path) = gog_key.get_value::<String, _>("path") {
-                    let path = PathBuf::from(install_path.replace("\\", "/"))
-                        .parent()
-                        .unwrap()
-                        .join("Games")
-                        .join("KingdomComeDeliverance2");
+                    // `path` points at GalaxyClient.exe; the games live next to the Galaxy folder.
+                    if let Some(root) = PathBuf::from(install_path.replace('\\', "/")).parent().map(Path::to_path_buf) {
+                        let candidate = root.join("Games").join("KingdomComeDeliverance2");
 
-                    if path.exists() {
-                        return Ok(path);
+                        if candidate.exists() {
+                            return Ok(candidate);
+                        }
                     }
                 }
             }
         }
 
-        // Check common GOG paths
-        let common_paths = vec![
-            PathBuf::from(r"C:\GOG Games\KingdomComeDeliverance2"),
-            PathBuf::from(r"D:\GOG Games\KingdomComeDeliverance2"),
-            UserDirs::new()
-                .map(|ud| ud.home_dir().join("GOG Games/KingdomComeDeliverance2"))
-                .unwrap_or_default(),
-        ];
+        find_gog_in_common_paths().ok_or_else(|| Error::new(ErrorKind::NotFound, "GOG installation not found"))
+    }
 
-        for path in common_paths {
-            if path.join("Data").exists() {
+    /// Reads the Steam installation path from the Windows registry.
+    fn steam_install_path_from_registry() -> Result<PathBuf, Error> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        // Try both registry keys
+        let keys = [r"SOFTWARE\Valve\Steam", r"SOFTWARE\WOW6432Node\Valve\Steam"];
+
+        for key in &keys {
+            if let Ok(subkey) = hklm.open_subkey(key) {
+                if let Ok(install_path) = subkey.get_value::<String, _>("InstallPath") {
+                    return Ok(PathBuf::from(install_path));
+                }
+            }
+        }
+
+        Err(Error::new(ErrorKind::NotFound, "Steam installation path not found in registry"))
+    }
+}
+
+#[cfg(not(windows))]
+mod platform {
+    use super::{Error, ErrorKind, UserDirs, find_gog_in_common_paths, game_path_in_library, resolve_other_steam_library_paths};
+    use std::path::PathBuf;
+
+    /// Well-known Steam root directories on Linux / macOS (including Flatpak installs).
+    fn steam_roots() -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+
+        if let Some(user_dirs) = UserDirs::new() {
+            let home = user_dirs.home_dir();
+            roots.push(home.join(".steam").join("steam"));
+            roots.push(home.join(".local").join("share").join("Steam"));
+            roots.push(home.join(".var").join("app").join("com.valvesoftware.Steam").join(".local/share/Steam"));
+            roots.push(home.join("Library").join("Application Support").join("Steam"));
+        }
+
+        roots
+    }
+
+    pub fn find_steam_installation() -> Result<PathBuf, Error> {
+        for root in steam_roots() {
+            if let Some(path) = game_path_in_library(&root) {
+                return Ok(path);
+            }
+
+            if let Some(path) = resolve_other_steam_library_paths(&root) {
                 return Ok(path);
             }
         }
 
-        Err(std::io::Error::new(
-            ErrorKind::NotFound,
-            "GOG installation not found",
-        ))
-    }
-}
-
-// Function to get the Steam installation path from the Windows registry, returning a PathBuf.
-fn get_steam_install_path_from_registry() -> Result<PathBuf, Error> {
-    let hkcu = RegKey::predef(HKEY_LOCAL_MACHINE);
-    // Try both registry keys
-    let keys = [r"SOFTWARE\Valve\Steam", r"SOFTWARE\WOW6432Node\Valve\Steam"];
-
-    for key in &keys {
-        if let Ok(subkey) = hkcu.open_subkey(key) {
-            if let Ok(install_path) = subkey.get_value::<String, _>("InstallPath") {
-                return Ok(PathBuf::from(install_path));
-            }
-        }
+        Err(Error::new(ErrorKind::NotFound, "KingdomComeDeliverance2 Steam installation not found"))
     }
 
-    Err(Error::new(
-        ErrorKind::NotFound,
-        "Steam installation path not found in registry",
-    ))
-}
-
-// Function to check the default Steam library path for KingdomComeDeliverance2.
-fn check_default_steam_library_path(steam_install_path: &PathBuf) -> Option<PathBuf> {
-    let game_path = steam_install_path
-        .join("steamapps")
-        .join("common")
-        .join("KingdomComeDeliverance2");
-
-    if game_path.exists() {
-        return Some(game_path);
+    pub fn find_gog_installation() -> Result<PathBuf, Error> {
+        find_gog_in_common_paths().ok_or_else(|| Error::new(ErrorKind::NotFound, "GOG installation not found"))
     }
-
-    None
-}
-
-// Function to resolve other library paths from libraryfolders.vdf.
-fn resolve_other_steam_library_paths(steam_install_path: &PathBuf) -> Option<PathBuf> {
-    let vdf_path = steam_install_path
-        .join("steamapps")
-        .join("libraryfolders.vdf");
-
-    if !vdf_path.exists() {
-        return None;
-    }
-
-    let content = fs::read_to_string(vdf_path).ok()?;
-
-    // Search line by line for lines containing the "path" key.
-    for line in content.lines() {
-        if line.contains("\"path\"") {
-            // Use a simple split on quotes to extract the path value.
-            // This assumes the line format is something like: `"path"		"X:\Some\Path"`
-            let parts: Vec<&str> = line.split('"').collect();
-            if parts.len() >= 4 {
-                let custom_path_str = parts[3];
-                let custom_path = PathBuf::from(custom_path_str)
-                    .join("steamapps")
-                    .join("common")
-                    .join("KingdomComeDeliverance2");
-
-                if custom_path.exists() {
-                    return Some(custom_path);
-                }
-            }
-        }
-    }
-
-    None
 }

@@ -59,6 +59,7 @@ impl BilingualGenerator {
         let defaut_language_to_process = vec![
             String::from("Chineses"),
             String::from("English"),
+            String::from("Czech"),
             // String::from("German"),
             // String::from("French"),
             // String::from("Spanish"),
@@ -317,7 +318,7 @@ impl BilingualGenerator {
                                             }
                                             // Handle very short primary texts or combined texts exceeding character limits.
                                             _ if primary_text_str.chars().count() <= 6
-                                                || (primary_text_str.chars().count() + secondary_text_str.chars().count() > 1040) =>
+                                                || (primary_text_str.chars().count() + secondary_text_str.chars().count() > 920) =>
                                             {
                                                 primary_text_str.to_string().into() // Only primary text
                                             }
@@ -337,8 +338,17 @@ impl BilingualGenerator {
                                     // If still "MISSING", fall back to the English text.
                                     let fallback_text = if secondary_text_str != "MISSING" {
                                         secondary_text_str
-                                    } else {
+                                    } else if english_text_str != "MISSING" {
                                         english_text_str
+                                    } else {
+                                        #[cfg(debug_assertions)]
+                                        {
+                                            "MISSING"
+                                        }
+                                        #[cfg(not(debug_assertions))]
+                                        {
+                                            ""
+                                        }
                                     };
                                     format!("{}{}{}", primary_text_str, SEPARATOR_NEWLINE, fallback_text).into()
                                 }
@@ -369,7 +379,7 @@ impl BilingualGenerator {
                                         secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_SLASH)
                                     }
                                     // Longer texts, provided they don't exceed a combined character limit, use a newline.
-                                    _ if primary_text_str.chars().count() + secondary_text_str.chars().count() < 1000 => {
+                                    _ if primary_text_str.chars().count() + secondary_text_str.chars().count() < 932 => {
                                         secondary_text_combined(primary_text_str, secondary_text_str, SEPARATOR_NEWLINE)
                                     }
                                     // Very long texts, just use the primary text.
@@ -380,8 +390,17 @@ impl BilingualGenerator {
                                     // If secondary text is missing, fall back to English text.
                                     let fallback_text = if secondary_text_str != "MISSING" {
                                         secondary_text_str
-                                    } else {
+                                    } else if english_text_str != "MISSING" {
                                         english_text_str
+                                    } else {
+                                        #[cfg(debug_assertions)]
+                                        {
+                                            "MISSING"
+                                        }
+                                        #[cfg(not(debug_assertions))]
+                                        {
+                                            ""
+                                        }
                                     };
                                     format!("{}{}{}", primary_text_str, SEPARATOR_SLASH, fallback_text).into()
                                 }

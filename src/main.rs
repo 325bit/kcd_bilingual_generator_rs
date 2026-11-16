@@ -5,6 +5,6 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Bilingual Pak Generator",
         options,
-        Box::new(|_cc| Ok(Box::new(GuiBilingualPakGenerator::default()))),
+        Box::new(|cc| Ok(Box::new(GuiBilingualPakGenerator::new(cc)))),
     )
 }

@@ -13,10 +13,13 @@ mod tests {
         // Call the read_xml_from_paks function to parse XML files
         match generator.read_xml_from_paks() {
             Ok(_) => {
-                let dialogxml = XmlFile("text_ui_dialog.xml".into());
+                let dialogxml = XmlFile("text_ui_menus.xml".into());
                 let extracted_data = generator.all_data.get(&dialogxml).unwrap();
-                let xml_data = extracted_data.get(&Language("English".into())).unwrap();
-                let entry_id = EntryId("zlod_henry_zavri_klapacku_2dQP".into());
+                for language in extracted_data.keys() {
+                    println!("Language found: {:?}", language);
+                }
+                let xml_data = extracted_data.get(&Language("Czech".into())).unwrap();
+                let entry_id = EntryId("ui_derivstat_charisma_desc".into());
                 let content = xml_data.get(&entry_id).expect(&format!("在 xml_data 中未找到 ID 为 '{:?}' 的条目。", entry_id));
                 println!("content it get = {:?}", content);
 
