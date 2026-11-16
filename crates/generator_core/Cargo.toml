@@ -12,6 +12,9 @@ tokio = { version = "1.44.2", features = ["full"] }
 thiserror = "2.0.12"
 faststr = "0.2.31"
 path_finder = { path = "../path_finder" }
+# The single runtime config file is JSON, so the format stays hand-editable.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dev-dependencies]
 # Tests build throwaway game PAKs (they are plain ZIP archives) to exercise the generator

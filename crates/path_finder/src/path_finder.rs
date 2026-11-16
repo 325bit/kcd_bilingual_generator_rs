@@ -58,7 +58,10 @@ fn resolve_other_steam_library_paths(steam_install_path: &Path) -> Option<PathBu
         if line.contains("\"path\"") {
             let parts: Vec<&str> = line.split('"').collect();
             if parts.len() >= 4 {
-                if let Some(found) = game_path_in_library(Path::new(parts[3])) {
+                // VDF escapes backslashes (`"E:\\SteamLibrary"`), so the raw value would produce a
+                // path with doubled separators that only works by accident on Windows.
+                let library_path = parts[3].replace("\\\\", "\\");
+                if let Some(found) = game_path_in_library(Path::new(&library_path)) {
                     return Some(found);
                 }
             }

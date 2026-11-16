@@ -14,8 +14,8 @@ mod tests {
         let mut generator = BilingualGenerator::init()?;
         generator.game_path = game_path.to_path_buf();
         println!("Generator's Workspace is :{:?}", generator.working_dir);
-        let _ = generator.acquire_bilingual_set();
-        println!("generator.acquire_bilingual_set = {:?}", generator.language_to_process);
+        println!("generator.language_to_process = {:?}", generator.language_to_process);
+        println!("generator.bilingual_set = {:?}", generator.bilingual_set);
         generator.read_xml_from_paks().unwrap_or_else(|e| {
             panic!("Problem reading xml from paks, error:{e}");
         });

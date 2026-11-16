@@ -1,7 +1,0 @@
-Chineset + English
-Chineses + English
-Chineses + French
-Chineses + German
-Chineses + Spanish
-Chineses + Czech
-Chineses + Japanese

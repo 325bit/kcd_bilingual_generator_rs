@@ -1,22 +1,20 @@
 # kcd_bilingual_generator_rs 
 
-一个简单的 Rust 双语生成器，适用于《Kingdom Come: Deliverance 1&2》  
-这个bilingual generator按照中文的体验习惯生成双语文本，包括不显示某些过长的文本为双语，有些较短的文本用 '/' 做分隔符等。众所周知，中文在相同长度下承载的信息量一般较大。如果你想修改双语文本的显示逻辑，欢迎自己修改bilingual_generator.rs
+一个简单的 Rust 双语生成器，适用于 Kingdom Come: Deliverance 1&2
+这个bilingual generator按照中文的体验习惯生成双语文本，包括不显示某些过长的文本为双语，有些较短的文本用 '/' 做分隔符等。
 
 ---
 
 ## 使用教程  
 
 ### 1. 下载可执行文件  
-前往 [Release 页面](https://github.com/325bit/kcd_bilingual_generator_rs/releases) 下载最新版本的 `kcd_bilingual_generator_rust.exe`。  
+前往 [Release 页面](https://github.com/325bit/kcd_bilingual_generator_rs/releases) 下载 `kcd_bilingual_generator_rust.exe`。  
 
-### 2. 设置文件  
-1. 在可执行文件所在目录下新建一个名为 `assets` 的文件夹。  
-2. 在 `assets` 文件夹内创建一个名为 `bilingual_set.txt` 的文件。  
-   - 文件格式可参考 [GitHub 仓库中的示例](https://github.com/325bit/kcd_bilingual_generator_rs/blob/main/assets/bilingual_set.txt)。  
+### 2. 运行
+运行 `kcd_bilingual_generator_rust.exe`。首次启动会在当前目录生成配置文件，对游戏路径和双语组合的修改都会保存到配置文件中。
 
 ### 3. 生成双语 Mod  
-运行下载的 `.exe` 文件，点击 **Generate Bilingual Pak** 按钮，程序会自动生成一个 `.pak` 文件，这是双语 Mod 的核心文件。  
+点击 **Generate Bilingual Pak** 按钮，生成 `.pak` 文件，这是双语 Mod 的核心文件。  
 
 ### 4. 准备 Mod  
 1. 使用 [KCD Mod Generator](https://github.com/altire-dev/kcd-toolkit) 生成 Mod，或者：  

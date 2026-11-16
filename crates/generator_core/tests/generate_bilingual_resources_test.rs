@@ -8,7 +8,8 @@ mod tests {
     #[test]
     fn generate_bilingual_resources_test() -> Result<(), BilingualGeneratorError> {
         let mut generator = BilingualGenerator::init()?;
-        let bilingual_set = generator.acquire_bilingual_set()?;
+        // Same list the config file holds; `init()` seeds it with the defaults.
+        let bilingual_set = generator.bilingual_set.clone();
         match generator.read_xml_from_paks() {
             Ok(_) => {
                 for (primary_language, secondary_language) in bilingual_set {

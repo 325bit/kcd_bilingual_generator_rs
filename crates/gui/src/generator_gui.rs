@@ -1,5 +1,4 @@
 use eframe::egui;
-use path_finder::PathFinder;
 use rayon::prelude::*;
 use std::{
     path::PathBuf,
@@ -10,7 +9,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use generator_core::{bilingual_generator::BilingualGenerator, bilingual_generator_errors::BilingualGeneratorError, log::LogSink};
+use generator_core::{
+    bilingual_generator::BilingualGenerator,
+    bilingual_generator_errors::BilingualGeneratorError,
+    config::{AppConfig, pairs_to_text, parse_pairs_text},
+    log::LogSink,
+};
 
 type GenerationResult = Result<Vec<String>, BilingualGeneratorError>;
 
@@ -19,7 +23,15 @@ type GenerationResult = Result<Vec<String>, BilingualGeneratorError>;
 type LogBuffer = Arc<Mutex<Vec<String>>>;
 
 pub struct GuiBilingualPakGenerator {
-    game_location: PathBuf,
+    /// Everything that lives in `kcd_bilingual_generator_rust.json`: game path + pairs to emit.
+    config: AppConfig,
+    /// Absolute path of that file, so the window can show where it is.
+    config_path: PathBuf,
+    /// The pair list as the user sees it: one `Primary + Secondary` per line. Kept separate from
+    /// `config.bilingual_set` so a half-typed line does not become a config change.
+    bilingual_set_text: String,
+    /// Why the text block currently does not parse, shown right under it.
+    pairs_error: Option<String>,
     messages: String,
     /// The generation job currently running in the background, if any.
     pending: Option<PendingJob>,
@@ -41,21 +53,85 @@ enum JobOutcome {
 
 impl Default for GuiBilingualPakGenerator {
     fn default() -> Self {
-        let mut pathfinder = PathFinder::new();
-        let game_location = pathfinder.find_game_path().cloned().unwrap_or_default();
-        Self {
-            game_location,
+        // The config file is the only setup a release build needs: it is created on first launch
+        // (with the default pairs) and read back on every launch after that.
+        let loaded = AppConfig::load_or_create(&Self::config_dir());
+        let mut app = Self {
+            bilingual_set_text: pairs_to_text(&loaded.config.bilingual_set),
+            config: loaded.config,
+            config_path: loaded.path,
+            pairs_error: None,
             messages: String::new(),
             pending: None,
+        };
+        for note in loaded.notes {
+            app.push_message(&note);
         }
+        app.push_message(&format!("{} bilingual pair(s) configured", app.config.bilingual_set.len()));
+        app
     }
 }
 
 impl GuiBilingualPakGenerator {
+    /// Directory the config file lives in: the process working directory.
+    fn config_dir() -> PathBuf {
+        std::env::current_dir().unwrap_or_default()
+    }
+
     /// Builds the app and applies the custom fonts/style exactly once.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_style(&cc.egui_ctx);
         Self::default()
+    }
+
+    /// Persists the config after an in-window edit. Failures are reported, never fatal: the
+    /// generation itself does not depend on the file being writable.
+    fn persist_config(&mut self) {
+        if let Err(error) = self.config.save_to(&self.config_path) {
+            let message = format!("Could not save {}: {error}", self.config_path.display());
+            self.push_message(&message);
+        }
+    }
+
+    /// Applies an edited game path and writes it straight away, so a crash or a shortcut that
+    /// starts elsewhere cannot lose the setting.
+    fn set_game_path(&mut self, path: String) {
+        if self.config.game_path == path {
+            return;
+        }
+        self.config.game_path = path;
+        self.persist_config();
+    }
+
+    /// Re-reads the JSON file, picking up pairs the user added by editing it in a text editor.
+    fn reload_config(&mut self) {
+        let loaded = AppConfig::load_or_create(&Self::config_dir());
+        self.config = loaded.config;
+        self.config_path = loaded.path;
+        self.bilingual_set_text = pairs_to_text(&self.config.bilingual_set);
+        self.pairs_error = None;
+        for note in loaded.notes {
+            self.push_message(&note);
+        }
+        self.push_message(&format!("{} bilingual pair(s) configured", self.config.bilingual_set.len()));
+    }
+
+    /// Turns an edited text block into config pairs and saves it.
+    ///
+    /// A line that does not parse leaves the config (and the file) untouched and only shows an
+    /// inline error, so typing never wipes the list the user is halfway through.
+    fn apply_pairs_text(&mut self) {
+        match parse_pairs_text(&self.bilingual_set_text) {
+            Ok(pairs) => {
+                self.pairs_error = None;
+                if self.config.bilingual_set == pairs {
+                    return;
+                }
+                self.config.bilingual_set = pairs;
+                self.persist_config();
+            }
+            Err(error) => self.pairs_error = Some(error.to_string()),
+        }
     }
 
     /// Appends one line, keeping the buffer newline-terminated.
@@ -145,11 +221,11 @@ impl GuiBilingualPakGenerator {
             }
         });
 
-        let game_location = self.game_location.clone();
+        let config = self.config.clone();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
             // A closed receiver means the app is gone; ignoring the error is intentional.
-            let _ = tx.send(run_generation(game_location, sink));
+            let _ = tx.send(run_generation(config, sink));
         });
 
         self.pending = Some(PendingJob {
@@ -161,11 +237,10 @@ impl GuiBilingualPakGenerator {
 }
 
 /// Runs the whole pipeline off the UI thread.
-fn run_generation(game_location: PathBuf, log_sink: LogSink) -> GenerationResult {
-    let mut generator = BilingualGenerator::init()?;
-    generator.game_path = game_location;
+fn run_generation(config: AppConfig, log_sink: LogSink) -> GenerationResult {
+    let mut generator = BilingualGenerator::from_config(&config)?;
     generator.set_log_sink(log_sink);
-    let bilingual_set = generator.acquire_bilingual_set()?;
+    let bilingual_set = config.pairs();
     generator.read_xml_from_paks()?;
 
     bilingual_set
@@ -220,6 +295,9 @@ fn configure_style(ctx: &egui::Context) {
         (egui::TextStyle::Body, egui::FontId::new(18.0, egui::FontFamily::Proportional)),
         (egui::TextStyle::Button, egui::FontId::new(18.0, egui::FontFamily::Proportional)),
         (egui::TextStyle::Small, egui::FontId::new(14.0, egui::FontFamily::Proportional)),
+        // Replacing the whole map would drop Monospace, and `RichText::monospace()` panics when
+        // the style is missing (it is used for the config list and the messages area).
+        (egui::TextStyle::Monospace, egui::FontId::new(14.0, egui::FontFamily::Monospace)),
     ]
     .into();
     style.spacing.interact_size = egui::Vec2::new(150.0, 40.0);
@@ -245,32 +323,85 @@ impl eframe::App for GuiBilingualPakGenerator {
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new("Game Location").size(18.0));
                 ui.horizontal(|ui| {
-                    // Convert PathBuf to String for editing
-                    let mut path_str = self.game_location.to_string_lossy().into_owned();
+                    // The text edit needs an owned buffer; the config is only touched on change.
+                    let mut path_str = self.config.game_path.clone();
 
                     // Create the text edit with the string copy
                     let text_edit = egui::TextEdit::singleline(&mut path_str)
                         .desired_width(ui.available_width() - 155.0)
-                        .desired_rows(2);
+                        .desired_rows(2)
+                        .hint_text(r"E:\SteamLibrary\steamapps\common\KingdomComeDeliverance2");
 
                     // Always update from text input, regardless of path validity
                     let response = ui.add(text_edit);
                     if response.changed() {
-                        self.game_location = PathBuf::from(&path_str);
+                        self.set_game_path(path_str);
                     }
 
                     // Change Location button
                     if ui.button("Change Location").clicked() {
                         if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                            self.game_location = path;
+                            self.set_game_path(path.display().to_string());
                         }
                     }
 
                     // Optional: Show validation status
-                    if response.lost_focus() && !self.game_location.exists() {
+                    if response.lost_focus() && !self.config.game_path_buf().exists() {
                         ui.colored_label(egui::Color32::RED, "⛔ Invalid path");
                     }
                 });
+            });
+            ui.separator();
+
+            // Config file section: the JSON is the only setup file, so show where it lives and
+            // let the pair list be edited in place. Every valid change is written straight back.
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Config").size(18.0));
+                    ui.label(egui::RichText::new(self.config_path.display().to_string()).weak().size(14.0));
+                    if ui
+                        .button("Reload")
+                        .on_hover_text("Re-read the JSON after editing it in a text editor")
+                        .clicked()
+                    {
+                        self.reload_config();
+                    }
+                });
+
+                // Restored sub-heading: names the editable block. The pair count is deliberately
+                // not repeated here — the box itself shows every pair, and the count is already
+                // reported in Messages.
+                ui.label(egui::RichText::new("Bilingual set").size(18.0));
+
+                // Editable list: one `Primary + Secondary` per line, comments and blank lines ok.
+                // The frame is drawn explicitly: the theme's own text-edit frame is invisible on
+                // this background, and an editable block must read as a field, not as a label.
+                egui::ScrollArea::vertical().id_salt("bilingual_set_list").max_height(160.0).show(ui, |ui| {
+                    egui::Frame::new()
+                        .fill(ui.visuals().extreme_bg_color)
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(76)))
+                        .corner_radius(3)
+                        .inner_margin(egui::Margin::symmetric(6, 4))
+                        .show(ui, |ui| {
+                            let editor = ui
+                                .add(
+                                    egui::TextEdit::multiline(&mut self.bilingual_set_text)
+                                        .font(egui::FontId::new(14.0, egui::FontFamily::Monospace))
+                                        .frame(false)
+                                        .desired_rows(7)
+                                        .desired_width(f32::INFINITY)
+                                        .hint_text("Chineses + English"),
+                                )
+                                .on_hover_text("One pair per line: Primary + Secondary\nEvery edit is saved to the JSON immediately");
+                            if editor.changed() {
+                                self.apply_pairs_text();
+                            }
+                        });
+                });
+
+                if let Some(error) = &self.pairs_error {
+                    ui.colored_label(egui::Color32::from_rgb(230, 120, 90), format!("⛔ {error} (the list is unchanged)"));
+                }
             });
             ui.separator();
 
@@ -280,7 +411,9 @@ impl eframe::App for GuiBilingualPakGenerator {
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(ui.available_size(), egui::Layout::top_down(egui::Align::Center), |ui| {
                         let running = self.pending.is_some();
-                        let button = ui.add_enabled(!running, egui::Button::new("Generate Bilingual Pak"));
+                        // A list that does not parse would silently fall back to the previous
+                        // pairs, so generation stays disabled until the box is fixed.
+                        let button = ui.add_enabled(!running && self.pairs_error.is_none(), egui::Button::new("Generate Bilingual Pak"));
 
                         if button.clicked() {
                             self.start_generation();

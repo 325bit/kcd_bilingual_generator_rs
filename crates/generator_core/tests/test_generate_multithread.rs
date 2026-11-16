@@ -10,7 +10,8 @@ mod tests {
     //cargo test --release --package generator_core --test test_generate_multithread -- tests::test_generate_multithread --exact --show-output
     fn test_generate_multithread() -> Result<(), BilingualGeneratorError> {
         let mut generator = BilingualGenerator::init()?;
-        let bilingual_set = generator.acquire_bilingual_set()?;
+        // Same list the config file holds; `init()` seeds it with the defaults.
+        let bilingual_set = generator.bilingual_set.clone();
 
         generator.read_xml_from_paks()?;
 

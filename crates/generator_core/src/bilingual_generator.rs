@@ -1,6 +1,7 @@
 use crate::util::{SEPARATOR_NEWLINE, SEPARATOR_SLASH, create_new_pak, secondary_text_combined};
 
 use super::bilingual_generator_errors::BilingualGeneratorError;
+use crate::config::AppConfig;
 use crate::log::LogSink;
 use faststr::FastStr;
 use indexmap::IndexMap;
@@ -11,7 +12,7 @@ use rayon::prelude::*;
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, Read},
+    io::Read,
     path::PathBuf,
     sync::{
         Mutex,
@@ -27,6 +28,8 @@ pub struct BilingualGenerator {
     pub working_dir: PathBuf,
     pub files_to_process: Vec<String>,
     pub language_to_process: Vec<String>,
+    /// Pairs to emit, from the config file. Empty until a config is applied.
+    pub bilingual_set: Vec<(FastStr, FastStr)>,
     pub all_data: HashMap<XmlFile, HashMap<Language, IndexMap<EntryId, TextEntry>>>,
     /// Where non-fatal diagnostics go. `None` falls back to stderr, which only works when the
     /// process actually owns a console (debug builds and headless runs).
@@ -133,15 +136,10 @@ impl BilingualGenerator {
             String::from("text_ui_menus.xml"),     // Menus
             String::from("text_ui_misc.xml"),
         ];
-        let defaut_language_to_process = vec![
-            String::from("Chineses"),
-            String::from("English"),
-            String::from("Czech"),
-            // String::from("German"),
-            // String::from("French"),
-            // String::from("Spanish"),
-            // String::from("Japanese"),
-        ];
+        // Kept in step with the config defaults so a plain `init()` is usable on its own
+        // (tests, examples); the GUI applies the real config through [`Self::from_config`].
+        let default_config = AppConfig::default();
+        let defaut_language_to_process = default_config.languages();
         let mut path_finder = PathFinder::new();
         // let game_path = path_finder
         //     .find_game_path()
@@ -151,11 +149,17 @@ impl BilingualGenerator {
             Ok(path) => path.to_path_buf(),
             Err(_) => PathBuf::new(),
         };
+        let bilingual_set: Vec<(FastStr, FastStr)> = default_config
+            .bilingual_set
+            .into_iter()
+            .map(|pair| (pair.primary.into(), pair.secondary.into()))
+            .collect();
         Ok(Self {
             game_path: kcd_path,
             working_dir,
             files_to_process,
             language_to_process: defaut_language_to_process,
+            bilingual_set,
             all_data: HashMap::new(),
             log_sink: None,
             trace_reverse_lookup: false,
@@ -209,45 +213,31 @@ impl BilingualGenerator {
             other_hits: self.lookup_other_hits.load(Ordering::Relaxed),
         }
     }
-    pub fn acquire_bilingual_set(&mut self) -> Result<Vec<(FastStr, FastStr)>, BilingualGeneratorError> {
-        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::new());
-        // println!("Working directory: {:?}", working_dir);
-        let bilingual_set_dir = working_dir.join(r"assets\bilingual_set.txt");
-        // println!("Bilingual set directory: {:?}", bilingual_set_dir);
-        let bilingual_set_file = File::open(&bilingual_set_dir)
-            .map_err(|_| BilingualGeneratorError::InvalidBilingualSet(format!("No bilingual_set.txt in {:?}", bilingual_set_dir)))?;
-        let reader = BufReader::new(bilingual_set_file);
-        let mut bilingual_set: Vec<(FastStr, FastStr)> = vec![];
-        // start reading
-        for (_, line_result) in reader.lines().enumerate() {
-            let line: String = line_result.map_err(|_| BilingualGeneratorError::InvalidBilingualSet("Fail to get String.".to_string()))?;
-            let trimmed_line = line.trim();
+    /// Builds a generator driven by an already-loaded config file.
+    ///
+    /// The config is the single source of truth for both the game path and the pairs to emit, so
+    /// callers only have to load it once (see [`AppConfig::load_or_create`]).
+    pub fn from_config(config: &AppConfig) -> Result<Self, BilingualGeneratorError> {
+        let mut generator = Self::init()?;
+        generator.apply_config(config);
+        Ok(generator)
+    }
 
-            // Skip empty lines
-            if trimmed_line.is_empty() {
-                continue;
-            }
-
-            // Split into primary and secondary languages
-            let parts: Vec<&str> = trimmed_line.split('+').map(|s| s.trim()).collect();
-            if parts.len() != 2 {
-                return Err(BilingualGeneratorError::InvalidBilingualSet(line));
-            }
-
-            let primary_language = parts[0].to_string();
-            let secondary_language = parts[1].to_string();
-            // Check and add primary language if missing
-            if !self.language_to_process.contains(&primary_language) {
-                self.language_to_process.push(primary_language.clone());
-            }
-
-            // Check and add secondary language if missing
-            if !self.language_to_process.contains(&secondary_language) {
-                self.language_to_process.push(secondary_language.clone());
-            }
-            bilingual_set.push((primary_language.into(), secondary_language.into()));
+    /// Replaces the game path, the pairs to generate, and the languages to read from the PAKs.
+    ///
+    /// An empty `game_path` keeps whatever auto-detection found, so a config created before the
+    /// game was installed still works.
+    pub fn apply_config(&mut self, config: &AppConfig) {
+        let game_path = config.game_path_buf();
+        if !game_path.as_os_str().is_empty() {
+            self.game_path = game_path;
         }
-        Ok(bilingual_set)
+        self.bilingual_set = config
+            .bilingual_set
+            .iter()
+            .map(|pair| (pair.primary.clone().into(), pair.secondary.clone().into()))
+            .collect();
+        self.language_to_process = config.languages();
     }
 
     /// Reads XML files from the pak files located in the Localization folder and stores the Entry id
